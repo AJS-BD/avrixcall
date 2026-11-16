@@ -15,6 +15,13 @@ Branding: the real Avrixlab logo, loaded from
 referenced by URL, never copied into this repo — snapshot pushes cannot
 carry binaries. Dark near-black + gold theme, same as the Avrixlab site.
 
+Design: the Avrixlab visual language — Fraunces serif display type +
+Inter, near-black `#050505` + gold `#D4AF37` / light gold `#F2D879`, one
+button system (gold primary, gold outline, ghost, danger), cards, status
+pills, one field style. The shared classes live in `app/globals.css`
+(`.eyebrow`, `.h2`, `.card`, `.btn-primary`, `.pill`, `.field`, …), so
+every page reads as one product.
+
 Stack: Next.js 16 (App Router) + TypeScript + Tailwind v4 + Supabase.
 Video: Jitsi Meet IFrame API (script tag, no jitsi npm package). The only
 npm dependency beyond the Next.js scaffold is `@supabase/supabase-js`.
@@ -72,12 +79,19 @@ npm run dev
 
 ## Pages & routes
 
-- `/` — public home: Avrixlab logo, join a room by name, live calls
-  first, then scheduled.
-- `/call/[id]` — the room: Jitsi video + live group chat + who is in
-  the call.
-- `/admin` — password login, then: create/start/end calls and open the
-  room.
+- `/` — public home: sticky header with logo, hero with serif display
+  headline, join-a-room-by-name card, live/scheduled/total stats, and
+  the calls list (LIVE / SCHEDULED pills, relative start time). The list
+  updates live via a Realtime subscription on `avrix_calls` (30s poll as
+  a fallback) — no manual reload needed.
+- `/call/[id]` — the room: Jitsi video in a rounded card + live group
+  chat (bubble messages, admin badge, message count) + who is in the
+  call as name chips.
+- `/admin` — password login, then a dashboard: overview stats (total /
+  live / scheduled / ended), create-call card, and the calls list with
+  status pills and Start / Open room / End actions, plus Refresh. The
+  list also updates live (Realtime + 30s poll). The “call is live”
+  notice only shows while that call is still live.
 - `POST /api/calls/[id]/join` — display name → participant row (no
   checks). `GET` verifies a stored row is still active.
 - `POST /api/calls/[id]/leave` — close a participant row

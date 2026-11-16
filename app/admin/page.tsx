@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import type { AvrixCall } from '@/lib/types';
+import { supabase } from '@/lib/supabase-client';
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—';
@@ -18,6 +19,12 @@ function formatTime(iso: string | null): string {
 
 type AuthState = 'checking' | 'login' | 'authed';
 
+interface Notice {
+  text: string;
+  /** Call the notice is about — shown only while that call is still live. */
+  callId: string | null;
+}
+
 export default function AdminPage() {
   const [auth, setAuth] = useState<AuthState>('checking');
   const [password, setPassword] = useState('');
@@ -27,7 +34,8 @@ export default function AdminPage() {
   const [title, setTitle] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [creating, setCreating] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchCalls = useCallback(async () => {
     const res = await fetch('/api/admin/calls');
@@ -75,6 +83,31 @@ export default function AdminPage() {
     };
   }, []);
 
+  // Live updates once signed in: Realtime on the calls table, 30s poll
+  // as a fallback.
+  useEffect(() => {
+    if (auth !== 'authed') return;
+    let cancelled = false;
+    const channel = supabase
+      .channel('avrix-calls-admin')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'avrix_calls' },
+        () => {
+          if (!cancelled) void fetchCalls();
+        },
+      )
+      .subscribe();
+    const timer = setInterval(() => {
+      if (!cancelled) void fetchCalls();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [auth, fetchCalls]);
+
   async function login(e: React.FormEvent) {
     e.preventDefault();
     setLoginError('');
@@ -95,20 +128,30 @@ export default function AdminPage() {
     await fetch('/api/admin/logout', { method: 'POST' });
     setAuth('login');
     setCalls([]);
+    setNotice(null);
+  }
+
+  async function refresh() {
+    setRefreshing(true);
+    await fetchCalls();
+    setRefreshing(false);
   }
 
   async function createCall(startNow: boolean) {
     const trimmed = title.trim();
     if (!trimmed) {
-      setNotice('Give the call a title first.');
+      setNotice({ text: 'Give the call a title first.', callId: null });
       return;
     }
     if (!startNow && !scheduledAt) {
-      setNotice('Pick a date and time, or use “Start now”.');
+      setNotice({
+        text: 'Pick a date and time, or use “Start now”.',
+        callId: null,
+      });
       return;
     }
     setCreating(true);
-    setNotice('');
+    setNotice(null);
     const res = await fetch('/api/admin/calls', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -122,17 +165,21 @@ export default function AdminPage() {
     });
     setCreating(false);
     if (!res.ok) {
-      setNotice('Could not create the call.');
+      setNotice({ text: 'Could not create the call.', callId: null });
       return;
     }
     const data = await res.json();
-    setCalls((prev) => [data.call as AvrixCall, ...prev]);
+    const created = data.call as AvrixCall;
+    setCalls((prev) => [created, ...prev]);
     setTitle('');
     setScheduledAt('');
     setNotice(
       startNow
-        ? 'Call is live — join it from “Open room” before anyone else does, so you hold moderator.'
-        : 'Call scheduled.',
+        ? {
+            text: 'Call is live — join it from “Open room” before anyone else does, so you hold moderator.',
+            callId: created.id,
+          }
+        : { text: 'Call scheduled.', callId: null },
     );
   }
 
@@ -152,11 +199,24 @@ export default function AdminPage() {
     return updated;
   }
 
+  // A "call is live" notice is only relevant while that call is live.
+  const showNotice =
+    notice !== null &&
+    (notice.callId === null ||
+      calls.some((c) => c.id === notice.callId && c.status === 'live'));
+
+  const stats = {
+    total: calls.length,
+    live: calls.filter((c) => c.status === 'live').length,
+    scheduled: calls.filter((c) => c.status === 'scheduled').length,
+    ended: calls.filter((c) => c.status === 'ended').length,
+  };
+
   // ---- render ----
 
   if (auth === 'checking') {
     return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center text-neutral-400">
+      <div className="flex min-h-screen items-center justify-center px-5 text-muted">
         Loading…
       </div>
     );
@@ -164,201 +224,267 @@ export default function AdminPage() {
 
   if (auth === 'login') {
     return (
-      <div className="mx-auto max-w-md px-5 py-16">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={AVRIXLAB_LOGO_URL}
-          alt="Avrix Labs"
-          className="h-10 w-auto"
-        />
-        <h1 className="mt-6 font-serif text-2xl font-bold text-white">
-          Avrix<span className="text-gold">Call</span> Admin
-        </h1>
-        <p className="mt-2 text-neutral-400">
-          Enter the admin password to manage calls.
-        </p>
-        <form onSubmit={login} className="mt-6">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              setLoginError('');
-            }}
-            placeholder="Admin password"
-            autoFocus
-            className="w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
-          />
-          {loginError && (
-            <p className="mt-2 text-sm text-red-400">{loginError}</p>
-          )}
-          <button
-            type="submit"
-            className="mt-3 w-full rounded bg-gold px-4 py-2 font-semibold text-black hover:brightness-110"
+      <div className="flex min-h-screen items-center justify-center px-4 py-16">
+        <div className="card fade-up w-full max-w-md p-6 sm:p-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={AVRIXLAB_LOGO_URL} alt="Avrix Labs" className="h-11 w-auto" />
+          <h1 className="mt-6 font-display text-3xl font-semibold text-cream">
+            Avrix<span className="gold-text">Call</span> Admin
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            Enter the admin password to manage calls.
+          </p>
+          <form onSubmit={login} className="mt-6">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setLoginError('');
+              }}
+              placeholder="Admin password"
+              autoFocus
+              className="field"
+            />
+            {loginError && (
+              <p className="mt-2 text-sm text-red-400">{loginError}</p>
+            )}
+            <button type="submit" className="btn-primary btn-block mt-4">
+              Sign in
+            </button>
+          </form>
+          <Link
+            href="/"
+            className="mt-5 inline-block text-sm font-medium text-goldlight hover:text-gold"
           >
-            Sign in
-          </button>
-        </form>
-        <Link href="/" className="mt-4 inline-block text-sm text-gold underline">
-          Back to calls
-        </Link>
+            ← Back to calls
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-8">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={AVRIXLAB_LOGO_URL}
-            alt="Avrix Labs"
-            className="h-9 w-auto"
-          />
-          <h1 className="font-serif text-2xl font-bold text-white">
-            Avrix<span className="text-gold">Call</span>{' '}
-            <span className="text-lg text-neutral-400">Admin</span>
-          </h1>
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-40 border-b border-line bg-ink/85 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={AVRIXLAB_LOGO_URL} alt="Avrix Labs" className="h-9 w-auto" />
+            <span className="font-display text-xl font-semibold text-cream">
+              Avrix<span className="gold-text">Call</span>
+            </span>
+            <span className="pill pill-muted">ADMIN</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="btn-ghost btn-sm">
+              View site
+            </Link>
+            <button onClick={logout} className="btn-ghost btn-sm">
+              Sign out
+            </button>
+          </div>
         </div>
-        <button
-          onClick={logout}
-          className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-gold hover:text-gold"
-        >
-          Sign out
-        </button>
       </header>
 
-      {notice && (
-        <p className="mt-4 rounded border border-gold/40 bg-gold/10 px-3 py-2 text-sm text-gold">
-          {notice}
-        </p>
-      )}
-
-      <section className="mt-6 rounded-lg border border-neutral-800 bg-panel p-4">
-        <h2 className="font-serif text-lg font-bold text-white">
-          Create a call
-        </h2>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={200}
-            placeholder="Call title, e.g. Weekly market update"
-            className="min-w-0 flex-1 rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
-          />
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            className="rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none focus:border-gold"
-          />
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
+        <div className="fade-up">
+          <p className="eyebrow">Console</p>
+          <h1 className="mt-3 font-display text-3xl font-semibold text-cream sm:text-4xl">
+            Manage your calls
+          </h1>
+          <p className="lede">
+            Schedule a call, start one now, or open a live room to hold the
+            moderator seat.
+          </p>
         </div>
-        <div className="mt-3 flex gap-2">
-          <button
-            onClick={() => void createCall(false)}
-            disabled={creating}
-            className="rounded border border-gold px-4 py-2 text-sm font-semibold text-gold hover:bg-gold/10 disabled:opacity-40"
-          >
-            Schedule call
-          </button>
-          <button
-            onClick={() => void createCall(true)}
-            disabled={creating}
-            className="rounded bg-gold px-4 py-2 text-sm font-semibold text-black hover:brightness-110 disabled:opacity-40"
-          >
-            Start now
-          </button>
-        </div>
-      </section>
 
-      <section className="mt-8">
-        <h2 className="font-serif text-xl font-bold text-white">Calls</h2>
-        {listError && <p className="mt-2 text-sm text-red-400">{listError}</p>}
-        {calls.length === 0 && (
-          <p className="mt-3 text-neutral-400">No calls yet.</p>
-        )}
-        <ul className="mt-3 space-y-3">
-          {calls.map((call) => (
-            <li
-              key={call.id}
-              className="rounded-lg border border-neutral-800 bg-panel p-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="font-serif text-lg font-bold text-white">
-                    {call.title}
-                  </span>
-                  <span
-                    className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      call.status === 'live'
-                        ? 'bg-emerald-500/15 text-emerald-400'
-                        : call.status === 'scheduled'
-                          ? 'bg-gold/15 text-gold'
-                          : 'bg-neutral-700/40 text-neutral-400'
-                    }`}
-                  >
-                    {call.status.toUpperCase()}
-                  </span>
-                  <p className="mt-1 text-sm text-neutral-400">
-                    {call.status === 'scheduled'
-                      ? `Starts ${formatTime(call.scheduled_at)}`
-                      : call.status === 'live'
-                        ? 'Live now'
-                        : `Ended ${formatTime(call.ended_at)}`}
-                    {' · '}
-                    <span className="font-mono text-xs">
-                      {call.room_name}
-                    </span>
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {call.status === 'scheduled' && (
-                    <button
-                      onClick={() =>
-                        void patchCall(call.id, { action: 'start' })
-                      }
-                      className="rounded bg-gold px-3 py-1.5 text-sm font-semibold text-black hover:brightness-110"
-                    >
-                      Start
-                    </button>
-                  )}
-                  {call.status === 'live' && (
-                    <>
-                      <a
-                        href={`/call/${call.id}?name=Admin&role=admin`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded border border-gold px-3 py-1.5 text-sm font-semibold text-gold hover:bg-gold/10"
-                      >
-                        Open room
-                      </a>
-                      <button
-                        onClick={() =>
-                          void patchCall(call.id, { action: 'end' })
-                        }
-                        className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-500"
-                      >
-                        End
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </li>
+        {/* Overview stats */}
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          {[
+            { label: 'Total calls', value: stats.total, accent: 'text-cream' },
+            { label: 'Live now', value: stats.live, accent: 'text-emerald' },
+            { label: 'Scheduled', value: stats.scheduled, accent: 'text-goldlight' },
+            { label: 'Ended', value: stats.ended, accent: 'text-muted' },
+          ].map((s) => (
+            <div key={s.label} className="card px-4 py-4 sm:px-5">
+              <p
+                className={`font-display text-3xl font-semibold leading-none sm:text-4xl ${s.accent}`}
+              >
+                {s.value}
+              </p>
+              <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted">
+                {s.label}
+              </p>
+            </div>
           ))}
-        </ul>
-      </section>
+        </div>
 
-      <footer className="mt-10 border-t border-neutral-800 pt-4 text-xs text-neutral-500">
-        Admin login is a single shared password — test-grade, not production
-        auth. Join the room yourself before anyone else does, so you hold
-        the Jitsi moderator seat. Note: the free Jitsi server asks the
-        first person to sign in with Google or GitHub before a meeting can
-        start — sign in at meet.jit.si in the same browser first if the
-        room shows a sign-in screen. Anyone with a room link can join;
-        there is no allowlist or seat check anymore.
-      </footer>
+        {showNotice && notice && (
+          <div className="mt-6 flex items-start gap-3 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-goldlight">
+            <span aria-hidden className="mt-0.5 text-base leading-none">●</span>
+            <span>{notice.text}</span>
+          </div>
+        )}
+
+        {/* Create a call */}
+        <section className="card mt-6 p-5 sm:p-6">
+          <p className="eyebrow">New call</p>
+          <h2 className="mt-3 font-display text-2xl font-semibold text-cream">
+            Create a call
+          </h2>
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={200}
+              placeholder="Call title, e.g. Weekly market update"
+              className="field mt-0 min-w-0 flex-1"
+            />
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              aria-label="Scheduled date and time"
+              className="field mt-0 lg:w-64"
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={() => void createCall(false)}
+              disabled={creating}
+              className="btn-outline"
+            >
+              Schedule call
+            </button>
+            <button
+              onClick={() => void createCall(true)}
+              disabled={creating}
+              className="btn-primary"
+            >
+              {creating ? 'Starting…' : 'Start now'}
+            </button>
+          </div>
+        </section>
+
+        {/* Calls list */}
+        <section className="mt-10">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="eyebrow">Rooms</p>
+              <h2 className="h2 mt-3">All calls</h2>
+            </div>
+            <button
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              className="btn-ghost btn-sm"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+
+          {listError && <p className="mt-4 text-sm text-red-400">{listError}</p>}
+          {calls.length === 0 && !listError && (
+            <div className="card mt-6 px-6 py-10 text-center">
+              <p className="font-display text-xl font-semibold text-cream">
+                No calls yet
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                Create your first call above — schedule it ahead, or start one
+                right now.
+              </p>
+            </div>
+          )}
+
+          <ul className="mt-6 space-y-3">
+            {calls.map((call) => {
+              const ended = call.status === 'ended';
+              return (
+                <li
+                  key={call.id}
+                  className={`card p-5 sm:p-6 ${ended ? 'opacity-70' : 'lift'}`}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-display text-xl font-semibold leading-tight text-cream">
+                          {call.title}
+                        </span>
+                        <span
+                          className={`pill ${
+                            call.status === 'live'
+                              ? 'pill-green'
+                              : call.status === 'scheduled'
+                                ? 'pill-gold'
+                                : 'pill-muted'
+                          }`}
+                        >
+                          {call.status === 'live' && (
+                            <span className="pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald" />
+                          )}
+                          {call.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted">
+                        {call.status === 'scheduled'
+                          ? `Starts ${formatTime(call.scheduled_at)}`
+                          : call.status === 'live'
+                            ? 'Live now'
+                            : `Ended ${formatTime(call.ended_at)}`}
+                      </p>
+                      <p className="mt-1 font-mono text-xs text-muted">
+                        {call.room_name}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {call.status === 'scheduled' && (
+                        <button
+                          onClick={() =>
+                            void patchCall(call.id, { action: 'start' })
+                          }
+                          className="btn-primary btn-sm"
+                        >
+                          Start
+                        </button>
+                      )}
+                      {call.status === 'live' && (
+                        <>
+                          <a
+                            href={`/call/${call.id}?name=Admin&role=admin`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-outline btn-sm"
+                          >
+                            Open room
+                          </a>
+                          <button
+                            onClick={() =>
+                              void patchCall(call.id, { action: 'end' })
+                            }
+                            className="btn-danger"
+                          >
+                            End
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <footer className="mt-12 border-t border-line pt-5 text-xs leading-relaxed text-muted">
+          Admin login is a single shared password — test-grade, not
+          production auth. Join the room yourself before anyone else does,
+          so you hold the Jitsi moderator seat. Note: the free Jitsi server
+          asks the first person to sign in with Google or GitHub before a
+          meeting can start — sign in at meet.jit.si in the same browser
+          first if the room shows a sign-in screen. Anyone with a room link
+          can join; there is no allowlist or seat check anymore.
+        </footer>
+      </main>
     </div>
   );
 }

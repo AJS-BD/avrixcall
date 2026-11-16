@@ -1,12 +1,385 @@
 @import "tailwindcss";
 
 @theme {
-  --color-gold: #f2d879;
-  --color-ink: #0a0a0a;
-  --color-panel: #141414;
+  --color-ink: #050505;
+  --color-panel: #0e0d0a;
+  --color-panel2: #121210;
+  --color-gold: #d4af37;
+  --color-goldlight: #f2d879;
+  --color-cream: #ede8dc;
+  --color-muted: #9a958a;
+  --color-line: #26241f;
+  --color-emerald: #1fd199;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
 }
 
-html,
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  background: #0a0a0a;
+  background: #050505;
+  color: #ede8dc;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #d4af37;
+  color: #050505;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0e0d0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a352c;
+  border-radius: 8px;
+  border: 2px solid #0e0d0a;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4af37;
+}
+
+input,
+select,
+textarea {
+  color-scheme: dark;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared design system — one spacing rhythm, one type scale, one      */
+/* gold. Sections: py-14 mobile / py-24 desktop, max-width 1200px.    */
+/* ------------------------------------------------------------------ */
+
+.section {
+  margin-inline: auto;
+  max-width: 1200px;
+  padding-inline: 1rem;
+  padding-block: 3.5rem;
+}
+@media (min-width: 768px) {
+  .section {
+    padding-block: 6rem;
+  }
+}
+
+/* Eyebrow: small, letterspaced, gold, uppercase, with a short rule. */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #d4af37;
+}
+.eyebrow::before {
+  content: "";
+  height: 1px;
+  width: 2rem;
+  background: #d4af37;
+  flex-shrink: 0;
+}
+
+/* H2: one display size everywhere. */
+.h2 {
+  font-family: var(--font-display);
+  font-size: 1.875rem;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #ede8dc;
+}
+@media (min-width: 768px) {
+  .h2 {
+    font-size: 2.375rem;
+  }
+}
+
+.lede {
+  margin-top: 0.75rem;
+  max-width: 42rem;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: #9a958a;
+}
+
+/* Cards: subtle 1px border, flat panel, no glow. */
+.card {
+  border: 1px solid #26241f;
+  background: #0e0d0a;
+  border-radius: 1rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons — one system, used everywhere. Gold only for the primary    */
+/* action. Restrained: no shine sweep, no cheap glow. Every button     */
+/* has a visible hover AND focus state; disabled is clearly muted.     */
+/* ------------------------------------------------------------------ */
+.btn-primary,
+.btn-outline,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.25;
+  padding: 12px 24px;
+  min-height: 44px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+.btn-primary:focus-visible,
+.btn-outline:focus-visible,
+.btn-ghost:focus-visible,
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #f2d879;
+  outline-offset: 2px;
+}
+.btn-primary:disabled,
+.btn-outline:disabled,
+.btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #e8c95a 0%, #d4af37 45%, #f2d879 100%);
+  color: #050505;
+  border: 1px solid transparent;
+  box-shadow: 0 2px 10px rgba(212, 175, 55, 0.18);
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 22px rgba(212, 175, 55, 0.28);
+}
+.btn-primary:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 6px rgba(212, 175, 55, 0.18);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(212, 175, 55, 0.55);
+  color: #f2d879;
+}
+.btn-outline:hover {
+  background: rgba(212, 175, 55, 0.1);
+  border-color: #d4af37;
+  color: #f2d879;
+}
+.btn-outline:active {
+  transform: translateY(1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid #26241f;
+  color: #9a958a;
+}
+.btn-ghost:hover {
+  background: #0e0d0a;
+  border-color: #3a352c;
+  color: #ede8dc;
+}
+.btn-ghost:active {
+  transform: translateY(1px);
+}
+
+/* Sizes — same system, different scale. */
+.btn-sm {
+  min-height: 36px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  border-radius: 10px;
+}
+.btn-lg {
+  min-height: 52px;
+  padding: 14px 32px;
+  font-size: 1rem;
+  border-radius: 12px;
+}
+.btn-block {
+  width: 100%;
+}
+.btn-xs {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  border-radius: 8px;
+}
+/* Destructive ghost — e.g. ending a call. */
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  padding: 8px 16px;
+  min-height: 36px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(220, 90, 80, 0.5);
+  color: #e08a80;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+.btn-danger:hover {
+  background: rgba(220, 90, 80, 0.12);
+  border-color: rgba(220, 90, 80, 0.8);
+  color: #f0a49c;
+}
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-danger:focus-visible {
+  outline: 2px solid #f2d879;
+  outline-offset: 2px;
+}
+
+/* Status pills. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #26241f;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.pill-gold {
+  border-color: rgba(212, 175, 55, 0.55);
+  background: #2a2410;
+  color: #f2d879;
+}
+.pill-green {
+  border-color: #14532d;
+  background: #052e16;
+  color: #4ade80;
+}
+.pill-red {
+  border-color: #7f1d1d;
+  background: #450a0a;
+  color: #f87171;
+}
+.pill-muted {
+  border-color: #26241f;
+  background: #121210;
+  color: #9a958a;
+}
+
+/* Form fields — one input style. */
+.field {
+  margin-top: 0.25rem;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #26241f;
+  background: #0e0d0a;
+  padding: 12px 16px;
+  outline: none;
+  color: #ede8dc;
+}
+.field:focus {
+  border-color: #d4af37;
+}
+.field::placeholder {
+  color: #9a958a;
+}
+
+/* Gold gradient text (static — no shimmer animation). */
+.gold-text {
+  background: linear-gradient(90deg, #f2d879, #d4af37);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Entrance — subtle: 0.6s ease-out, 16px rise. */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 0.6s ease-out both;
+}
+
+/* Hover lift for cards — slight, border brightens, no garish glow. */
+.lift {
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  border-color: rgba(212, 175, 55, 0.35);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* Soft pulse for the live status dot. */
+@keyframes softPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(31, 209, 153, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(31, 209, 153, 0);
+  }
+}
+.pulse-dot {
+  animation: softPulse 2.4s ease-in-out infinite;
+}
+
+/* Reduced motion: keep everything still. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .fade-up,
+  .pulse-dot {
+    animation: none;
+  }
+  .btn-primary:hover,
+  .btn-outline:hover,
+  .btn-ghost:hover,
+  .lift:hover {
+    transform: none;
+  }
 }

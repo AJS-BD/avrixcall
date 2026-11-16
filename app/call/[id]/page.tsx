@@ -397,18 +397,20 @@ function RoomInner() {
 
   if (loadError) {
     return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center">
-        <p className="text-red-400">{loadError}</p>
-        <Link href="/" className="mt-4 inline-block text-gold underline">
-          Back to calls
-        </Link>
+      <div className="flex min-h-screen items-center justify-center px-4 py-16">
+        <div className="card fade-up w-full max-w-md px-6 py-10 text-center sm:px-8">
+          <p className="text-red-400">{loadError}</p>
+          <Link href="/" className="btn-primary mt-6">
+            Back to calls
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (!call) {
     return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center text-neutral-400">
+      <div className="flex min-h-screen items-center justify-center px-5 text-muted">
         Loading call…
       </div>
     );
@@ -416,82 +418,94 @@ function RoomInner() {
 
   if (call.status === 'ended') {
     return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center">
-        <h1 className="font-serif text-2xl font-bold text-white">
-          This call has ended.
-        </h1>
-        <p className="mt-2 text-neutral-400">
-          Thanks for joining “{call.title}”.
-        </p>
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded bg-gold px-4 py-2 text-sm font-semibold text-black"
-        >
-          Back to calls
-        </Link>
+      <div className="flex min-h-screen items-center justify-center px-4 py-16">
+        <div className="card fade-up w-full max-w-md px-6 py-10 text-center sm:px-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={AVRIXLAB_LOGO_URL}
+            alt="Avrix Labs"
+            className="mx-auto h-11 w-auto"
+          />
+          <h1 className="mt-6 font-display text-3xl font-semibold text-cream">
+            This call has ended.
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            Thanks for joining “{call.title}”.
+          </p>
+          <Link href="/" className="btn-primary mt-6">
+            Back to calls
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (call.status === 'scheduled') {
     return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center">
-        <h1 className="font-serif text-2xl font-bold text-white">
-          This call hasn&apos;t started yet.
-        </h1>
-        <p className="mt-2 text-neutral-400">
-          “{call.title}” is scheduled
-          {call.scheduled_at
-            ? ` for ${new Date(call.scheduled_at).toLocaleString()}`
-            : ''}
-          . Come back when the admin starts it.
-        </p>
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded bg-gold px-4 py-2 text-sm font-semibold text-black"
-        >
-          Back to calls
-        </Link>
+      <div className="flex min-h-screen items-center justify-center px-4 py-16">
+        <div className="card fade-up w-full max-w-md px-6 py-10 text-center sm:px-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={AVRIXLAB_LOGO_URL}
+            alt="Avrix Labs"
+            className="mx-auto h-11 w-auto"
+          />
+          <h1 className="mt-6 font-display text-3xl font-semibold text-cream">
+            This call hasn&apos;t started yet.
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            “{call.title}” is scheduled
+            {call.scheduled_at
+              ? ` for ${new Date(call.scheduled_at).toLocaleString()}`
+              : ''}
+            . Come back when the admin starts it.
+          </p>
+          <Link href="/" className="btn-primary mt-6">
+            Back to calls
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (!joined) {
     return (
-      <div className="mx-auto max-w-md px-5 py-16">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={AVRIXLAB_LOGO_URL}
-          alt="Avrix Labs"
-          className="h-10 w-auto"
-        />
-        <h1 className="mt-6 font-serif text-2xl font-bold text-white">
-          Join “{call.title}”
-        </h1>
-        <p className="mt-2 text-neutral-400">
-          Just your display name — no account, no password, no rules.
-        </p>
-        <form onSubmit={joinMeeting} className="mt-6 space-y-3">
-          <input
-            value={nameInput}
-            onChange={(e) => {
-              setNameInput(e.target.value);
-              setJoinError('');
-            }}
-            maxLength={60}
-            placeholder="Your name"
-            autoFocus
-            className="w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
+      <div className="flex min-h-screen items-center justify-center px-4 py-16">
+        <div className="card fade-up w-full max-w-md p-6 sm:p-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={AVRIXLAB_LOGO_URL}
+            alt="Avrix Labs"
+            className="h-11 w-auto"
           />
-          {joinError && <p className="text-sm text-red-400">{joinError}</p>}
-          <button
-            type="submit"
-            disabled={joinBusy}
-            className="w-full rounded bg-gold px-4 py-2 font-semibold text-black hover:brightness-110 disabled:opacity-40"
-          >
-            {joinBusy ? 'Joining…' : 'Join meeting'}
-          </button>
-        </form>
+          <h1 className="mt-6 font-display text-3xl font-semibold text-cream">
+            Join “{call.title}”
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            Just your display name — no account, no password, no rules.
+          </p>
+          <form onSubmit={joinMeeting} className="mt-6 space-y-3">
+            <input
+              value={nameInput}
+              onChange={(e) => {
+                setNameInput(e.target.value);
+                setJoinError('');
+              }}
+              maxLength={60}
+              placeholder="Your name"
+              autoFocus
+              className="field"
+            />
+            {joinError && <p className="text-sm text-red-400">{joinError}</p>}
+            <button
+              type="submit"
+              disabled={joinBusy}
+              className="btn-primary btn-block"
+            >
+              {joinBusy ? 'Joining…' : 'Join meeting'}
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -499,88 +513,106 @@ function RoomInner() {
   // ---- live room ----
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 px-4 py-3">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-ink/85 px-4 py-3 backdrop-blur sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={AVRIXLAB_LOGO_URL}
             alt="Avrix Labs"
-            className="h-8 w-auto"
+            className="h-8 w-auto shrink-0"
           />
-          <h1 className="font-serif text-lg font-bold leading-tight text-white">
+          <h1 className="truncate font-display text-lg font-semibold leading-tight text-cream">
             {call.title}
           </h1>
         </div>
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-400">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+          <span className="pill pill-green">
+            <span className="pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald" />
             LIVE
           </span>
-          <button
-            onClick={leave}
-            className="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-500"
-          >
+          <button onClick={leave} className="btn-danger">
             Leave
           </button>
         </div>
       </header>
 
       <div className="flex flex-1 flex-col lg:flex-row">
-        <div className="flex flex-1 flex-col">
-          <div
-            ref={jitsiContainer}
-            className="h-[55vh] w-full bg-black lg:h-auto lg:min-h-[70vh] lg:flex-1"
-          />
-          <div className="border-t border-neutral-800 px-4 py-2 text-sm">
-            <p className="text-neutral-400">
+        <div className="flex flex-1 flex-col gap-3 p-4 lg:p-5">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-black">
+            <div
+              ref={jitsiContainer}
+              className="h-[55vh] w-full bg-black lg:h-auto lg:min-h-[62vh] lg:flex-1"
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <p className="text-sm text-muted">
               Plain Jitsi call — control your own mic and camera in the video
               window.
               {jitsiJoined ? '' : ' Connecting to video…'}
             </p>
-            {jitsiError && <p className="mt-1 text-red-400">{jitsiError}</p>}
+            {jitsiError && <p className="text-sm text-red-400">{jitsiError}</p>}
           </div>
-          <div className="border-t border-neutral-800 px-4 py-2">
-            <p className="text-xs text-neutral-500">
-              In this call ({participants.length}):{' '}
-              {participants.length > 0
-                ? participants.map((p) => p.name).join(', ')
-                : 'just you so far'}
-            </p>
+          <div className="flex flex-wrap items-center gap-2 px-1">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
+              In this call ({participants.length})
+            </span>
+            {participants.length > 0 ? (
+              participants.map((p) => (
+                <span
+                  key={p.participant_id}
+                  className="pill pill-muted"
+                >
+                  {p.name}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-muted">just you so far</span>
+            )}
           </div>
         </div>
 
-        <aside className="flex h-[45vh] w-full flex-col border-t border-neutral-800 bg-panel lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0">
-          <h2 className="border-b border-neutral-800 px-4 py-3 font-serif text-base font-bold text-white">
-            Group chat
-          </h2>
+        <aside className="flex h-[45vh] w-full flex-col border-t border-line bg-panel lg:h-auto lg:w-[380px] lg:border-l lg:border-t-0">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <h2 className="font-display text-base font-semibold text-cream">
+              Group chat
+            </h2>
+            <span className="pill pill-muted">
+              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+            </span>
+          </div>
           <div
             ref={chatBox}
             className="flex-1 space-y-3 overflow-y-auto px-4 py-3"
           >
             {messages.length === 0 && (
-              <p className="text-sm text-neutral-500">
+              <p className="py-6 text-center text-sm text-muted">
                 No messages yet — say hello. Everyone in the call can text
                 here.
               </p>
             )}
             {messages.map((m) => (
-              <div key={m.id} className="text-sm">
-                <span className="font-semibold text-gold">{m.sender_name}</span>
-                {m.sender_role === 'admin' && (
-                  <span className="ml-1 rounded bg-gold/20 px-1 text-[10px] font-bold text-gold">
-                    ADMIN
+              <div
+                key={m.id}
+                className="rounded-xl border border-line bg-panel2 px-3 py-2"
+              >
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-sm font-semibold text-goldlight">
+                    {m.sender_name}
                   </span>
-                )}
-                <span className="ml-2 text-xs text-neutral-500">
-                  {formatTime(m.created_at)}
-                </span>
-                <p className="mt-0.5 break-words text-neutral-200">{m.body}</p>
+                  {m.sender_role === 'admin' && (
+                    <span className="pill pill-gold">ADMIN</span>
+                  )}
+                  <span className="text-xs text-muted">
+                    {formatTime(m.created_at)}
+                  </span>
+                </div>
+                <p className="mt-1 break-words text-sm text-cream">{m.body}</p>
               </div>
             ))}
           </div>
           <form
             onSubmit={sendMessage}
-            className="border-t border-neutral-800 p-3"
+            className="border-t border-line p-3"
           >
             <div className="flex gap-2">
               <input
@@ -588,11 +620,11 @@ function RoomInner() {
                 onChange={(e) => setChatInput(e.target.value)}
                 maxLength={1000}
                 placeholder="Message everyone…"
-                className="min-w-0 flex-1 rounded border border-neutral-700 bg-black px-3 py-2 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-gold"
+                className="field mt-0 min-w-0 flex-1"
               />
               <button
                 type="submit"
-                className="shrink-0 rounded bg-gold px-4 py-2 text-sm font-semibold text-black hover:brightness-110"
+                className="btn-primary btn-sm shrink-0"
               >
                 Send
               </button>
@@ -611,7 +643,7 @@ export default function CallPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-3xl px-5 py-16 text-center text-neutral-400">
+        <div className="flex min-h-screen items-center justify-center px-5 text-muted">
           Loading call…
         </div>
       }

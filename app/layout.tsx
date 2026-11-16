@@ -1,5 +1,18 @@
 import type { Metadata } from 'next';
+import { Fraunces, Inter } from 'next/font/google';
 import './globals.css';
+
+const fraunces = Fraunces({
+  variable: '--font-fraunces',
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  style: ['normal', 'italic'],
+});
+
+const inter = Inter({
+  variable: '--font-inter',
+  subsets: ['latin'],
+});
 
 export const metadata: Metadata = {
   title: 'AvrixCall',
@@ -13,8 +26,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full">
-      <body className="min-h-screen bg-[#0a0a0a] text-neutral-200 antialiased">
+    <html
+      lang="en"
+      className={`${fraunces.variable} ${inter.variable} h-full antialiased`}
+    >
+      <body className="flex min-h-screen flex-col bg-[#050505] text-[#ede8dc]">
         {children}
       </body>
     </html>
