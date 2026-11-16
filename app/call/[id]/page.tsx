@@ -1,32 +1,53 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import {
+  LiveKitRoom,
+  VideoConference,
+  useParticipants,
+} from '@livekit/components-react';
+import '@livekit/components-styles';
 import { supabase } from '@/lib/supabase-client';
 import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import type {
   AvrixCall,
   CallMessage,
-  ParticipantPresence,
   ParticipantRole,
 } from '@/lib/types';
-
-// Jitsi server. Override with NEXT_PUBLIC_JITSI_DOMAIN when moving to a
-// self-hosted server later — this is the only place the domain lives.
-const JITSI_DOMAIN =
-  process.env.NEXT_PUBLIC_JITSI_DOMAIN ?? 'meet.jit.si';
-
-function asRecord(v: unknown): Record<string, unknown> {
-  return (v ?? {}) as Record<string, unknown>;
-}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+// Inside <LiveKitRoom>: reports the LiveKit participant list up to the
+// page so the "In this call" chips render from LiveKit, not Supabase.
+function ParticipantTracker({
+  onChange,
+}: {
+  onChange: (list: { id: string; name: string }[]) => void;
+}) {
+  const participants = useParticipants();
+  useEffect(() => {
+    onChange(
+      participants.map((p) => ({
+        id: p.identity,
+        name: p.name || 'Guest',
+      })),
+    );
+  }, [participants, onChange]);
+  return null;
 }
 
 function RoomInner() {
@@ -42,24 +63,34 @@ function RoomInner() {
   const [role, setRole] = useState<ParticipantRole>('guest');
   const [participantId, setParticipantId] = useState('');
   const [joined, setJoined] = useState(false);
-  // Join form — display name only, no phone, no allowlist.
+  // LiveKit credentials, minted server-side after the member check.
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
+  const [livekitUrl, setLivekitUrl] = useState<string | null>(null);
+  const [videoConnected, setVideoConnected] = useState(false);
+  const [videoError, setVideoError] = useState('');
+  // Join form — display name + FULL phone number (members only).
   const [nameInput, setNameInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
 
   const [messages, setMessages] = useState<CallMessage[]>([]);
-  const [participants, setParticipants] = useState<ParticipantPresence[]>([]);
+  const [participants, setParticipants] = useState<
+    { id: string; name: string }[]
+  >([]);
   const [chatInput, setChatInput] = useState('');
   const [chatError, setChatError] = useState('');
-  const [jitsiJoined, setJitsiJoined] = useState(false);
-  const [jitsiError, setJitsiError] = useState('');
 
-  const jitsiApi = useRef<JitsiMeetExternalAPIInstance | null>(null);
-  const jitsiContainer = useRef<HTMLDivElement | null>(null);
-  const jitsiStarted = useRef(false);
   const chatBox = useRef<HTMLDivElement | null>(null);
   // Keep the current participant row handy for the beforeunload beacon.
   const seatRef = useRef({ callId: '', participantId: '' });
+
+  const onParticipantsChange = useCallback(
+    (list: { id: string; name: string }[]) => {
+      setParticipants(list);
+    },
+    [],
+  );
 
   // Load the call.
   useEffect(() => {
@@ -83,55 +114,78 @@ function RoomInner() {
   const callId = call?.id ?? '';
 
   // Resolve identity. Admin (?name=Admin&role=admin from the dashboard)
-  // joins without a participant row. Guests reuse a stored participant
-  // row for this call after verifying it is still active, otherwise join
-  // with just a display name.
+  // gets a server-minted admin token — no phone, no participant row.
+  // Guests reuse a stored join (name + phone + participant row) after
+  // verifying it, which mints a fresh token; otherwise they join with
+  // name + phone through the member check.
   useEffect(() => {
     if (!call || call.status !== 'live') return;
     const urlName = searchParams.get('name');
     const urlRole = searchParams.get('role');
     if (urlRole === 'admin' && urlName) {
-      const pid =
-        sessionStorage.getItem(`avrixcall_pid_${id}`) ?? crypto.randomUUID();
-      sessionStorage.setItem(`avrixcall_pid_${id}`, pid);
-      // Deferred: state updates do not belong in the synchronous effect body.
-      queueMicrotask(() => {
-        setName(urlName);
-        setRole('admin');
-        setParticipantId(pid);
-        seatRef.current = { callId: id, participantId: pid };
-        setJoined(true);
-      });
-      return;
+      let cancelled = false;
+      fetch('/api/admin/livekit-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ call_id: id }),
+      })
+        .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (cancelled || !ok) return;
+          const pid =
+            sessionStorage.getItem(`avrixcall_pid_${id}`) ??
+            crypto.randomUUID();
+          sessionStorage.setItem(`avrixcall_pid_${id}`, pid);
+          queueMicrotask(() => {
+            setName(urlName);
+            setRole('admin');
+            setParticipantId(pid);
+            seatRef.current = { callId: id, participantId: pid };
+            setLivekitToken(data.token as string);
+            setLivekitUrl(data.url as string);
+            setJoined(true);
+          });
+        })
+        .catch(() => {
+          // Admin token failed — stay on the join form.
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     let cancelled = false;
     const storedName = sessionStorage.getItem('avrixcall_name') ?? '';
+    const storedPhone = sessionStorage.getItem('avrixcall_phone') ?? '';
     const storedPid = sessionStorage.getItem(`avrixcall_pid_${id}`);
     queueMicrotask(() => {
       setNameInput(storedName);
+      setPhoneInput(storedPhone);
     });
 
-    if (storedPid && storedName) {
-      fetch(
-        `/api/calls/${id}/join?participant_id=${encodeURIComponent(storedPid)}`,
-      )
-        .then((r) => r.json())
-        .then((data) => {
-          if (cancelled) return;
-          if (data?.active) {
-            setName(data.name as string);
-            setRole('guest');
-            setParticipantId(data.participant_id as string);
-            seatRef.current = {
-              callId: id,
-              participantId: data.participant_id as string,
-            };
-            setJoined(true);
-          } else {
-            // Participant row was closed — join again with a name.
-            sessionStorage.removeItem(`avrixcall_pid_${id}`);
-          }
+    if (storedPid && storedName && storedPhone) {
+      fetch(`/api/calls/${id}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: storedName,
+          phone: storedPhone,
+          participant_id: storedPid,
+        }),
+      })
+        .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (cancelled || !ok) return;
+          setName(data.name as string);
+          setRole('guest');
+          setParticipantId(data.participant_id as string);
+          seatRef.current = {
+            callId: id,
+            participantId: data.participant_id as string,
+          };
+          setLivekitToken(data.token as string);
+          setLivekitUrl(data.url as string);
+          setJoined(true);
         })
         .catch(() => {
           // Verification failed — stay on the join form.
@@ -149,12 +203,16 @@ function RoomInner() {
       setJoinError('Enter your name.');
       return;
     }
+    if (!phoneInput.trim()) {
+      setJoinError('Enter your phone number.');
+      return;
+    }
     setJoinBusy(true);
     setJoinError('');
     const res = await fetch(`/api/calls/${id}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName }),
+      body: JSON.stringify({ name: trimmedName, phone: phoneInput.trim() }),
     });
     const data = await res.json().catch(() => ({}));
     setJoinBusy(false);
@@ -163,6 +221,7 @@ function RoomInner() {
       return;
     }
     sessionStorage.setItem('avrixcall_name', trimmedName);
+    sessionStorage.setItem('avrixcall_phone', phoneInput.trim());
     sessionStorage.setItem(
       `avrixcall_pid_${id}`,
       data.participant_id as string,
@@ -174,6 +233,8 @@ function RoomInner() {
       callId: id,
       participantId: data.participant_id as string,
     };
+    setLivekitToken(data.token as string);
+    setLivekitUrl(data.url as string);
     setJoined(true);
   }
 
@@ -205,85 +266,14 @@ function RoomInner() {
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [leaveSeat]);
 
-  // Start Jitsi once (never re-init on call updates).
-  useEffect(() => {
-    if (!joined || !call || !name || call.status === 'ended' || jitsiStarted.current) {
-      return;
-    }
-    const container = jitsiContainer.current;
-    if (!container) return;
-    jitsiStarted.current = true;
-
-    let api: JitsiMeetExternalAPIInstance | null = null;
-    let disposed = false;
-
-    const init = () => {
-      if (disposed || !window.JitsiMeetExternalAPI) return;
-      api = new window.JitsiMeetExternalAPI(JITSI_DOMAIN, {
-        roomName: call.room_name,
-        width: '100%',
-        height: '100%',
-        parentNode: container,
-        userInfo: { displayName: name },
-        configOverwrite: {
-          startWithAudioMuted: true,
-          startWithVideoMuted: true,
-          prejoinPageEnabled: false,
-          disableDeepLinking: true,
-          enableWelcomePage: false,
-        },
-        interfaceConfigOverwrite: { SHOW_JITSI_WATERMARK: false },
-      });
-      jitsiApi.current = api;
-      api.addListener('videoConferenceJoined', () => setJitsiJoined(true));
-    };
-
-    if (window.JitsiMeetExternalAPI) {
-      init();
-    } else {
-      const script = document.createElement('script');
-      script.src = `https://${JITSI_DOMAIN}/external_api.js`;
-      script.async = true;
-      script.onload = init;
-      script.onerror = () =>
-        setJitsiError(
-          'Could not load the video service. Check your connection and reload.',
-        );
-      document.head.appendChild(script);
-    }
-
-    return () => {
-      disposed = true;
-      try {
-        api?.dispose();
-      } catch {
-        // Ignore.
-      }
-      jitsiApi.current = null;
-    };
-  }, [joined, call, name]);
-
-  // Realtime channel: presence + call updates + chat.
-  // Presence carries {participant_id, name} ONLY.
+  // Realtime channel: call updates + chat. Presence comes from LiveKit
+  // (ParticipantTracker), not Supabase.
   useEffect(() => {
     if (!joined || !callId || !name || !participantId) return;
 
-    const channel: RealtimeChannel = supabase.channel(`call:${callId}`, {
-      config: { presence: { key: participantId }, broadcast: { self: true } },
-    });
+    const channel: RealtimeChannel = supabase.channel(`call:${callId}`);
 
     channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const list = (Object.values(state).flat() as unknown[])
-          .map((p) => asRecord(p))
-          .map((p) => ({
-            participant_id: String(p.participant_id ?? ''),
-            name: String(p.name ?? 'Guest'),
-          }))
-          .filter((p) => p.participant_id);
-        setParticipants(list);
-      })
       .on(
         'postgres_changes',
         {
@@ -293,7 +283,10 @@ function RoomInner() {
           filter: `id=eq.${callId}`,
         },
         (payload) => {
-          const row = asRecord((payload as { new?: unknown }).new);
+          const row = ((payload as { new?: unknown }).new ?? {}) as Record<
+            string,
+            unknown
+          >;
           setCall((prev) =>
             prev
               ? {
@@ -314,7 +307,10 @@ function RoomInner() {
           filter: `call_id=eq.${callId}`,
         },
         (payload) => {
-          const row = asRecord((payload as { new?: unknown }).new);
+          const row = ((payload as { new?: unknown }).new ?? {}) as Record<
+            string,
+            unknown
+          >;
           const msg = row as unknown as CallMessage;
           if (msg.id) {
             setMessages((prev) =>
@@ -323,11 +319,7 @@ function RoomInner() {
           }
         },
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void channel.track({ participant_id: participantId, name });
-        }
-      });
+      .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
@@ -385,11 +377,6 @@ function RoomInner() {
 
   function leave() {
     leaveSeat(false);
-    try {
-      jitsiApi.current?.dispose();
-    } catch {
-      // Ignore.
-    }
     router.push('/');
   }
 
@@ -468,7 +455,7 @@ function RoomInner() {
     );
   }
 
-  if (!joined) {
+  if (!joined || !livekitToken || !livekitUrl) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-16">
         <div className="card fade-up w-full max-w-md p-6 sm:p-8">
@@ -482,7 +469,8 @@ function RoomInner() {
             Join “{call.title}”
           </h1>
           <p className="mt-2 text-sm text-muted">
-            Just your display name — no account, no password, no rules.
+            Members only — enter your name and the phone number the admin
+            registered for you. No account, no password.
           </p>
           <form onSubmit={joinMeeting} className="mt-6 space-y-3">
             <input
@@ -496,13 +484,25 @@ function RoomInner() {
               autoFocus
               className="field"
             />
+            <input
+              value={phoneInput}
+              onChange={(e) => {
+                setPhoneInput(e.target.value);
+                setJoinError('');
+              }}
+              inputMode="tel"
+              autoComplete="tel"
+              maxLength={20}
+              placeholder="Phone number, e.g. 01XXXXXXXXX"
+              className="field"
+            />
             {joinError && <p className="text-sm text-red-400">{joinError}</p>}
             <button
               type="submit"
               disabled={joinBusy}
               className="btn-primary btn-block"
             >
-              {joinBusy ? 'Joining…' : 'Join meeting'}
+              {joinBusy ? 'Checking…' : 'Join meeting'}
             </button>
           </form>
         </div>
@@ -539,18 +539,40 @@ function RoomInner() {
       <div className="flex flex-1 flex-col lg:flex-row">
         <div className="flex flex-1 flex-col gap-3 p-4 lg:p-5">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-black">
-            <div
-              ref={jitsiContainer}
-              className="h-[55vh] w-full bg-black lg:h-auto lg:min-h-[62vh] lg:flex-1"
-            />
+            <div className="h-[55vh] w-full lg:h-auto lg:min-h-[62vh] lg:flex-1">
+              <LiveKitRoom
+                token={livekitToken}
+                serverUrl={livekitUrl}
+                connect
+                audio={false}
+                video={false}
+                onConnected={() => {
+                  setVideoConnected(true);
+                  setVideoError('');
+                }}
+                onDisconnected={() => setVideoConnected(false)}
+                onError={(err) =>
+                  setVideoError(
+                    err?.message ||
+                      'Could not connect to the video service.',
+                  )
+                }
+                className="h-full w-full"
+              >
+                <VideoConference />
+                <ParticipantTracker onChange={onParticipantsChange} />
+              </LiveKitRoom>
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-sm text-muted">
-              Plain Jitsi call — control your own mic and camera in the video
-              window.
-              {jitsiJoined ? '' : ' Connecting to video…'}
+              Members-only LiveKit call — your mic and camera start off;
+              turn them on from the video controls.
+              {videoConnected ? '' : ' Connecting to video…'}
             </p>
-            {jitsiError && <p className="text-sm text-red-400">{jitsiError}</p>}
+            {videoError && (
+              <p className="text-sm text-red-400">{videoError}</p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 px-1">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
@@ -558,10 +580,7 @@ function RoomInner() {
             </span>
             {participants.length > 0 ? (
               participants.map((p) => (
-                <span
-                  key={p.participant_id}
-                  className="pill pill-muted"
-                >
+                <span key={p.id} className="pill pill-muted">
                   {p.name}
                 </span>
               ))
@@ -610,10 +629,7 @@ function RoomInner() {
               </div>
             ))}
           </div>
-          <form
-            onSubmit={sendMessage}
-            className="border-t border-line p-3"
-          >
+          <form onSubmit={sendMessage} className="border-t border-line p-3">
             <div className="flex gap-2">
               <input
                 value={chatInput}
@@ -622,10 +638,7 @@ function RoomInner() {
                 placeholder="Message everyone…"
                 className="field mt-0 min-w-0 flex-1"
               />
-              <button
-                type="submit"
-                className="btn-primary btn-sm shrink-0"
-              >
+              <button type="submit" className="btn-primary btn-sm shrink-0">
                 Send
               </button>
             </div>

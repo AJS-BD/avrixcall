@@ -17,7 +17,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: 'AvrixCall',
   description:
-    'Plain Jitsi group calls with Avrixlab branding. Join a room by name — no account, no rules.',
+    'Members-only group calls with Avrixlab branding. Join with an invite link — your registered phone number is the check.',
 };
 
 export default function RootLayout({

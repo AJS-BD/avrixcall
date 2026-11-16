@@ -1,4 +1,4 @@
-// Removed: AvrixCall no longer manages participants (plain Jitsi, no rules).
+// Removed: AvrixCall no longer has an admin participant list.
 // Snapshot pushes cannot delete files, so the removal is a 410 here.
 
 function gone() {

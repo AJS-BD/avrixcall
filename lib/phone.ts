@@ -1,28 +1,15 @@
-// Phone normalization — ONE helper, used everywhere (join route, admin
-// routes, client forms). Canonical form is 13 digits starting with 880
-// (Bangladesh country code, no leading + or 0).
-//
-//   +880 1XXX-XXXXXX / 8801XXXXXXXXX  -> 8801XXXXXXXXX (kept as-is)
-//   01XXXXXXXXX (11 digits)           -> 8801XXXXXXXXX
-//   1XXXXXXXXX  (10 digits)           -> 8801XXXXXXXXX
-//
-// Anything else returns null (not a valid Bangladeshi mobile number).
+// Bangladesh mobile numbers, canonical 13-digit 880 form.
+// Accepts 01XXXXXXXXX, 8801XXXXXXXXX, +8801XXXXXXXXX, 1XXXXXXXXX,
+// with spaces, dashes or a leading +. Returns null when invalid.
+// (No OTP in this round — the number is typed, not SMS-verified.)
+
 export function normalizePhone(input: string): string | null {
   const digits = input.replace(/\D/g, '');
-  if (digits.length === 13 && digits.startsWith('880')) return digits;
-  if (digits.length === 11 && digits.startsWith('0')) {
-    return `880${digits.slice(1)}`;
-  }
-  if (digits.length === 10 && digits.startsWith('1')) {
-    return `880${digits}`;
-  }
+  // 8801XXXXXXXXX — already canonical.
+  if (/^8801[3-9]\d{8}$/.test(digits)) return digits;
+  // 01XXXXXXXXX — the usual local form.
+  if (/^01[3-9]\d{8}$/.test(digits)) return `880${digits.slice(1)}`;
+  // 1XXXXXXXXX — local form without the leading 0.
+  if (/^1[3-9]\d{8}$/.test(digits)) return `880${digits}`;
   return null;
-}
-
-/** Human-friendly display of a canonical number: +880 1XXX-XXXXXX. */
-export function displayPhone(canonical: string): string {
-  if (canonical.length === 13 && canonical.startsWith('880')) {
-    return `+880 ${canonical.slice(3, 7)}-${canonical.slice(7)}`;
-  }
-  return canonical;
 }

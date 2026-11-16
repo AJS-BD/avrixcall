@@ -1,4 +1,4 @@
-// Removed: AvrixCall no longer tracks blocked attempts (plain Jitsi, no rules).
+// Removed: blocked attempts are logged by the join route, but there is no admin feed for them yet.
 // Snapshot pushes cannot delete files, so the removal is a 410 here.
 
 function gone() {

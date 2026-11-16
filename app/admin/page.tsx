@@ -25,6 +25,20 @@ interface Notice {
   callId: string | null;
 }
 
+interface Member {
+  phone: string;
+  name: string | null;
+  created_at: string;
+}
+
+function formatPhone(phone: string): string {
+  // 8801XXXXXXXXX -> +880 1XXX-XXXXXX for display.
+  if (/^8801[3-9]\d{8}$/.test(phone)) {
+    return `+880 ${phone.slice(3, 7)}-${phone.slice(7)}`;
+  }
+  return phone;
+}
+
 export default function AdminPage() {
   const [auth, setAuth] = useState<AuthState>('checking');
   const [password, setPassword] = useState('');
@@ -36,6 +50,15 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Members (allowlist) — only these numbers can join a call.
+  const [members, setMembers] = useState<Member[]>([]);
+  const [membersError, setMembersError] = useState('');
+  const [memberPhone, setMemberPhone] = useState('');
+  const [memberName, setMemberName] = useState('');
+  const [memberBusy, setMemberBusy] = useState(false);
+  const [memberMessage, setMemberMessage] = useState('');
+  // Which call's invite link was just copied ("Copied" feedback).
+  const [copiedCallId, setCopiedCallId] = useState<string | null>(null);
 
   const fetchCalls = useCallback(async () => {
     const res = await fetch('/api/admin/calls');
@@ -52,6 +75,79 @@ export default function AdminPage() {
     setAuth('authed');
     return true;
   }, []);
+
+  const fetchMembers = useCallback(async () => {
+    const res = await fetch('/api/admin/allowlist');
+    if (!res.ok) {
+      setMembersError('Could not load members.');
+      return;
+    }
+    const data = await res.json();
+    setMembers((data.members ?? []) as Member[]);
+    setMembersError('');
+  }, []);
+
+  // Copy a call's invite link (admin only — the public page lists no
+  // calls, so this is the only place the link is visible).
+  async function copyInviteLink(callId: string) {
+    const url = `${window.location.origin}/call/${callId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard blocked — fall back to a prompt with the link selected.
+      window.prompt('Copy the invite link:', url);
+      return;
+    }
+    setCopiedCallId(callId);
+    window.setTimeout(() => {
+      setCopiedCallId((current) => (current === callId ? null : current));
+    }, 2500);
+  }
+
+  async function addMember(e: React.FormEvent) {
+    e.preventDefault();
+    const phone = memberPhone.trim();
+    if (!phone) {
+      setMemberMessage('Enter a phone number first.');
+      return;
+    }
+    setMemberBusy(true);
+    setMemberMessage('');
+    const res = await fetch('/api/admin/allowlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, name: memberName.trim() || undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setMemberBusy(false);
+    if (!res.ok) {
+      setMemberMessage(
+        (data?.error as string) || 'Could not add the member.',
+      );
+      return;
+    }
+    setMembers((prev) => {
+      const added = data.member as Member;
+      const rest = prev.filter((m) => m.phone !== added.phone);
+      return [added, ...rest];
+    });
+    setMemberPhone('');
+    setMemberName('');
+    setMemberMessage('Member added — they can join with their number.');
+  }
+
+  async function removeMember(phone: string) {
+    const res = await fetch('/api/admin/allowlist', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone }),
+    });
+    if (!res.ok) {
+      setMemberMessage('Could not remove the member.');
+      return;
+    }
+    setMembers((prev) => prev.filter((m) => m.phone !== phone));
+  }
 
   useEffect(() => {
     // State updates live in the promise continuations, not in the
@@ -74,6 +170,7 @@ export default function AdminPage() {
         if (cancelled || !data) return;
         setCalls((data.calls ?? []) as AvrixCall[]);
         setAuth('authed');
+        void fetchMembers();
       })
       .catch(() => {
         if (!cancelled) setListError('Could not load calls.');
@@ -81,7 +178,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchMembers]);
 
   // Live updates once signed in: Realtime on the calls table, 30s poll
   // as a fallback.
@@ -122,12 +219,14 @@ export default function AdminPage() {
     }
     setPassword('');
     await fetchCalls();
+    await fetchMembers();
   }
 
   async function logout() {
     await fetch('/api/admin/logout', { method: 'POST' });
     setAuth('login');
     setCalls([]);
+    setMembers([]);
     setNotice(null);
   }
 
@@ -294,8 +393,9 @@ export default function AdminPage() {
             Manage your calls
           </h1>
           <p className="lede">
-            Schedule a call, start one now, or open a live room to hold the
-            moderator seat.
+            Schedule a call, start one now, and manage who can join.
+            Only the members below can enter a call — and only you can
+            see or copy the invite links.
           </p>
         </div>
 
@@ -437,6 +537,16 @@ export default function AdminPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
+                      {call.status !== 'ended' && (
+                        <button
+                          onClick={() => void copyInviteLink(call.id)}
+                          className="btn-ghost btn-sm"
+                        >
+                          {copiedCallId === call.id
+                            ? 'Copied ✓'
+                            : 'Copy invite link'}
+                        </button>
+                      )}
                       {call.status === 'scheduled' && (
                         <button
                           onClick={() =>
@@ -475,14 +585,109 @@ export default function AdminPage() {
           </ul>
         </section>
 
+        {/* Members — only these numbers can join */}
+        <section className="mt-10">
+          <div>
+            <p className="eyebrow">Members</p>
+            <h2 className="h2 mt-3">
+              Who can join{' '}
+              <span className="text-muted">({members.length})</span>
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              Only these phone numbers can enter a call. A member opens
+              the invite link you send them, types their name and number,
+              and the server makes them a short-lived video key. Anyone
+              else is turned away.
+            </p>
+          </div>
+
+          <form
+            onSubmit={addMember}
+            className="card mt-6 flex flex-col gap-3 p-5 sm:p-6 lg:flex-row"
+          >
+            <input
+              value={memberPhone}
+              onChange={(e) => {
+                setMemberPhone(e.target.value);
+                setMemberMessage('');
+              }}
+              inputMode="tel"
+              autoComplete="tel"
+              maxLength={20}
+              placeholder="Phone number, e.g. 01XXXXXXXXX"
+              className="field mt-0 min-w-0 flex-1"
+            />
+            <input
+              value={memberName}
+              onChange={(e) => {
+                setMemberName(e.target.value);
+                setMemberMessage('');
+              }}
+              maxLength={60}
+              placeholder="Name (optional)"
+              className="field mt-0 min-w-0 flex-1"
+            />
+            <button
+              type="submit"
+              disabled={memberBusy}
+              className="btn-primary shrink-0"
+            >
+              {memberBusy ? 'Adding…' : 'Add member'}
+            </button>
+          </form>
+          {memberMessage && (
+            <p className="mt-3 text-sm text-goldlight">{memberMessage}</p>
+          )}
+          {membersError && (
+            <p className="mt-3 text-sm text-red-400">{membersError}</p>
+          )}
+
+          {members.length === 0 && !membersError && (
+            <div className="card mt-6 px-6 py-10 text-center">
+              <p className="font-display text-xl font-semibold text-cream">
+                No members yet
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                Add the first phone number above — until then, nobody can
+                join a call.
+              </p>
+            </div>
+          )}
+
+          <ul className="mt-6 space-y-3">
+            {members.map((m) => (
+              <li
+                key={m.phone}
+                className="card flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+              >
+                <div className="min-w-0">
+                  <p className="font-display text-lg font-semibold text-cream">
+                    {m.name || 'Member'}
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-muted">
+                    {formatPhone(m.phone)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => void removeMember(m.phone)}
+                  className="btn-danger btn-sm shrink-0"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         <footer className="mt-12 border-t border-line pt-5 text-xs leading-relaxed text-muted">
           Admin login is a single shared password — test-grade, not
-          production auth. Join the room yourself before anyone else does,
-          so you hold the Jitsi moderator seat. Note: the free Jitsi server
-          asks the first person to sign in with Google or GitHub before a
-          meeting can start — sign in at meet.jit.si in the same browser
-          first if the room shows a sign-in screen. Anyone with a room link
-          can join; there is no allowlist or seat check anymore.
+          production auth. Calls are members-only: a joiner&apos;s number
+          must be on the member list, and the server mints each member a
+          short-lived LiveKit video key (6 hours). A forwarded invite link
+          alone gets nobody in — and without a key the video server
+          refuses the connection. The public home page lists no calls;
+          only you can see or copy invite links here. Numbers are typed,
+          not SMS-verified — for full proof, add an OTP step later.
         </footer>
       </main>
     </div>
