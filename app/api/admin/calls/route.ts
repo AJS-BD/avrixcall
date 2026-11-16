@@ -41,6 +41,7 @@ export async function POST(req: Request) {
   }
   const roomName = `avrixcall-${randomBytes(4).toString('hex')}`;
   const db = getServiceClient();
+  const now = new Date().toISOString();
   const { data, error } = await db
     .from('avrix_calls')
     .insert({
@@ -48,6 +49,9 @@ export async function POST(req: Request) {
       room_name: roomName,
       status: startNow ? 'live' : 'scheduled',
       scheduled_at: startNow ? null : scheduledAt,
+      // "Start now" goes live immediately — stamp the start time here so
+      // the timer starts at 0. Scheduled calls get theirs from PATCH.
+      started_at: startNow ? now : null,
     })
     .select()
     .single();

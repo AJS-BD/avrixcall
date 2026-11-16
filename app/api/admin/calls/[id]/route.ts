@@ -18,6 +18,17 @@ export async function PATCH(
 
   if (action === 'start') {
     patch = { status: 'live' };
+    // Stamp the start time once — re-starting a call never resets the
+    // clock. (A call created with "Start now" already has started_at
+    // from the POST route; this covers scheduled calls being started.)
+    const { data: existing } = await db
+      .from('avrix_calls')
+      .select('started_at')
+      .eq('id', id)
+      .single();
+    if (!existing?.started_at) {
+      patch.started_at = new Date().toISOString();
+    }
   } else if (action === 'end') {
     patch = {
       status: 'ended',

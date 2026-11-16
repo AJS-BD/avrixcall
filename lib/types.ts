@@ -6,6 +6,7 @@ export interface AvrixCall {
   room_name: string;
   status: CallStatus;
   scheduled_at: string | null;
+  started_at: string | null;
   current_speaker_id: string | null;
   current_speaker_name: string | null;
   created_at: string;

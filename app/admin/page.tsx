@@ -1,9 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import type { AvrixCall } from '@/lib/types';
+import {
+  callStartMs,
+  elapsedMs,
+  formatCompact,
+  formatHMS,
+} from '@/lib/duration';
 import { supabase } from '@/lib/supabase-client';
 
 function formatTime(iso: string | null): string {
@@ -59,6 +65,21 @@ export default function AdminPage() {
   const [memberMessage, setMemberMessage] = useState('');
   // Which call's invite link was just copied ("Copied" feedback).
   const [copiedCallId, setCopiedCallId] = useState<string | null>(null);
+  // Ticking clock for live-call durations (1s client interval, only
+  // while a call is live — no extra fetches). Initialised to 0 and set
+  // in an effect — reading Date.now() in a state initializer breaks
+  // static prerendering in Next 16.
+  const hasLiveCall = useMemo(
+    () => calls.some((c) => c.status === 'live'),
+    [calls],
+  );
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+    if (!hasLiveCall) return;
+    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [hasLiveCall]);
 
   const fetchCalls = useCallback(async () => {
     const res = await fetch('/api/admin/calls');
@@ -499,6 +520,19 @@ export default function AdminPage() {
           <ul className="mt-6 space-y-3">
             {calls.map((call) => {
               const ended = call.status === 'ended';
+              // Live: ticking HH:MM:SS. Ended: final duration, compact.
+              // Scheduled: no duration — the scheduled time is shown.
+              const duration =
+                call.status === 'live'
+                  ? formatHMS(elapsedMs(callStartMs(call), nowMs))
+                  : call.status === 'ended' && call.ended_at
+                    ? formatCompact(
+                        elapsedMs(
+                          callStartMs(call),
+                          new Date(call.ended_at).getTime(),
+                        ),
+                      )
+                    : null;
               return (
                 <li
                   key={call.id}
@@ -529,8 +563,15 @@ export default function AdminPage() {
                         {call.status === 'scheduled'
                           ? `Starts ${formatTime(call.scheduled_at)}`
                           : call.status === 'live'
-                            ? 'Live now'
-                            : `Ended ${formatTime(call.ended_at)}`}
+                            ? (
+                              <>
+                                Live now ·{' '}
+                                <span className="font-semibold tabular-nums text-goldlight">
+                                  {duration}
+                                </span>
+                              </>
+                            )
+                            : `Ended ${formatTime(call.ended_at)}${duration ? ` · lasted ${duration}` : ''}`}
                       </p>
                       <p className="mt-1 font-mono text-xs text-muted">
                         {call.room_name}

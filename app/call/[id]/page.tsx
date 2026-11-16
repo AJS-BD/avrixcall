@@ -20,6 +20,12 @@ import {
 import '@livekit/components-styles';
 import { supabase } from '@/lib/supabase-client';
 import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
+import {
+  callStartMs,
+  elapsedMs,
+  formatCompact,
+  formatHMS,
+} from '@/lib/duration';
 import type {
   AvrixCall,
   CallMessage,
@@ -172,6 +178,24 @@ function CamIcon({ on, className }: { on: boolean; className?: string }) {
   );
 }
 
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-label="Call duration"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
 // ---- one row of the participants list ----
 
 function ParticipantRow({ p }: { p: ParticipantInfo }) {
@@ -279,6 +303,33 @@ function RoomInner() {
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatError, setChatError] = useState('');
+
+  // Ticking clock for the live duration timer (1s client interval).
+  // Initialised to 0 and set in an effect — reading Date.now() in a
+  // state initializer breaks static prerendering in Next 16.
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    queueMicrotask(() => setNowMs(Date.now()));
+    if (call?.status !== 'live') return;
+    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [call?.status]);
+
+  // Elapsed time: started_at (created_at for calls that started before
+  // the column existed) until now while live; frozen at ended_at once
+  // the call ends.
+  const startMs = useMemo(
+    () => (call ? callStartMs(call) : null),
+    [call],
+  );
+  const roomElapsedMs = useMemo(() => {
+    if (startMs === null || !call) return 0;
+    const endMs =
+      call.status === 'ended' && call.ended_at
+        ? new Date(call.ended_at).getTime()
+        : nowMs;
+    return elapsedMs(startMs, endMs);
+  }, [startMs, call, nowMs]);
 
   // Side panel: People | Chat tabs, unread badge, people search.
   const [activeTab, setActiveTab] = useState<'participants' | 'chat'>(
@@ -540,6 +591,11 @@ function RoomInner() {
               ? {
                   ...prev,
                   status: (row.status as AvrixCall['status']) ?? prev.status,
+                  // A scheduled call started by the admin arrives here —
+                  // merge started_at so the timer starts from the real
+                  // start, not created_at.
+                  started_at:
+                    (row.started_at as string | null) ?? prev.started_at,
                   ended_at: (row.ended_at as string | null) ?? null,
                 }
               : prev,
@@ -673,6 +729,9 @@ function RoomInner() {
           </h1>
           <p className="mt-2 text-sm text-muted">
             Thanks for joining “{call.title}”.
+            {call.ended_at && startMs !== null && (
+              <> The call lasted {formatCompact(roomElapsedMs)}.</>
+            )}
           </p>
           <Link href="/" className="btn-primary mt-6">
             Back to calls
@@ -784,6 +843,13 @@ function RoomInner() {
           <span className="pill pill-green">
             <span className="pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald" />
             LIVE
+          </span>
+          <span
+            className="pill pill-gold tabular-nums"
+            title={`Started ${startMs !== null ? new Date(startMs).toLocaleTimeString() : ''}`}
+          >
+            <ClockIcon className="mr-1.5 h-3.5 w-3.5" />
+            {formatHMS(roomElapsedMs)}
           </span>
           <button onClick={leave} className="btn-danger">
             Leave
