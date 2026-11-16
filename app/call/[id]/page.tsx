@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase-client';
-import { normalizePhone } from '@/lib/phone';
+import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import type {
   AvrixCall,
   CallMessage,
@@ -37,17 +37,15 @@ function RoomInner() {
 
   const [call, setCall] = useState<AvrixCall | null>(null);
   const [loadError, setLoadError] = useState('');
-  // Identity, resolved once the seat is verified (or admin bypass).
+  // Identity, resolved once joined (or admin bypass).
   const [name, setName] = useState<string | null>(null);
   const [role, setRole] = useState<ParticipantRole>('guest');
   const [participantId, setParticipantId] = useState('');
   const [joined, setJoined] = useState(false);
-  // Join gate form.
+  // Join form — display name only, no phone, no allowlist.
   const [nameInput, setNameInput] = useState('');
-  const [phoneInput, setPhoneInput] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
-  const [kicked, setKicked] = useState(false);
 
   const [messages, setMessages] = useState<CallMessage[]>([]);
   const [participants, setParticipants] = useState<ParticipantPresence[]>([]);
@@ -60,8 +58,7 @@ function RoomInner() {
   const jitsiContainer = useRef<HTMLDivElement | null>(null);
   const jitsiStarted = useRef(false);
   const chatBox = useRef<HTMLDivElement | null>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  // Keep the current seat handy for the beforeunload beacon.
+  // Keep the current participant row handy for the beforeunload beacon.
   const seatRef = useRef({ callId: '', participantId: '' });
 
   // Load the call.
@@ -85,10 +82,10 @@ function RoomInner() {
 
   const callId = call?.id ?? '';
 
-  // Resolve identity + seat. Admin (?name=Admin&role=admin from the
-  // dashboard) skips the allowlist entirely and takes a client-side id —
-  // the admin is not a phone seat. Guests reuse a stored seat for this
-  // call after verifying it is still active, otherwise join via the API.
+  // Resolve identity. Admin (?name=Admin&role=admin from the dashboard)
+  // joins without a participant row. Guests reuse a stored participant
+  // row for this call after verifying it is still active, otherwise join
+  // with just a display name.
   useEffect(() => {
     if (!call || call.status !== 'live') return;
     const urlName = searchParams.get('name');
@@ -110,11 +107,9 @@ function RoomInner() {
 
     let cancelled = false;
     const storedName = sessionStorage.getItem('avrixcall_name') ?? '';
-    const storedPhone = sessionStorage.getItem('avrixcall_phone') ?? '';
     const storedPid = sessionStorage.getItem(`avrixcall_pid_${id}`);
     queueMicrotask(() => {
       setNameInput(storedName);
-      setPhoneInput(storedPhone);
     });
 
     if (storedPid && storedName) {
@@ -134,8 +129,7 @@ function RoomInner() {
             };
             setJoined(true);
           } else {
-            // Seat was freed (admin removed it, or it expired) — the
-            // joiner must join again with name + phone.
+            // Participant row was closed — join again with a name.
             sessionStorage.removeItem(`avrixcall_pid_${id}`);
           }
         })
@@ -151,13 +145,8 @@ function RoomInner() {
   async function joinMeeting(e: React.FormEvent) {
     e.preventDefault();
     const trimmedName = nameInput.trim();
-    const phone = normalizePhone(phoneInput);
     if (!trimmedName) {
       setJoinError('Enter your name.');
-      return;
-    }
-    if (!phone) {
-      setJoinError('Enter a valid Bangladeshi phone number.');
       return;
     }
     setJoinBusy(true);
@@ -165,18 +154,15 @@ function RoomInner() {
     const res = await fetch(`/api/calls/${id}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName, phone }),
+      body: JSON.stringify({ name: trimmedName }),
     });
     const data = await res.json().catch(() => ({}));
     setJoinBusy(false);
     if (!res.ok) {
-      setJoinError(
-        (data?.error as string) || 'Could not join the call.',
-      );
+      setJoinError((data?.error as string) || 'Could not join the call.');
       return;
     }
     sessionStorage.setItem('avrixcall_name', trimmedName);
-    sessionStorage.setItem('avrixcall_phone', phone);
     sessionStorage.setItem(
       `avrixcall_pid_${id}`,
       data.participant_id as string,
@@ -191,7 +177,8 @@ function RoomInner() {
     setJoined(true);
   }
 
-  // Free the seat. Best effort on page close (beacon) and on Leave.
+  // Mark the participant row closed. Best effort on page close (beacon)
+  // and on Leave. Admins have no row — the call is a no-op for them.
   const leaveSeat = useCallback((beacon: boolean) => {
     const seat = seatRef.current;
     if (!seat.participantId || !seat.callId) return;
@@ -218,32 +205,7 @@ function RoomInner() {
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [leaveSeat]);
 
-  // Mic / camera helpers: toggle only when the state actually differs.
-  const setMic = useCallback(async (on: boolean) => {
-    const api = jitsiApi.current;
-    if (!api) return;
-    try {
-      const muted = await api.isAudioMuted();
-      if (on && muted) api.executeCommand('toggleAudio');
-      if (!on && !muted) api.executeCommand('toggleAudio');
-    } catch {
-      // Jitsi not ready — ignore.
-    }
-  }, []);
-
-  const setVideo = useCallback(async (on: boolean) => {
-    const api = jitsiApi.current;
-    if (!api) return;
-    try {
-      const muted = await api.isVideoMuted();
-      if (on && muted) api.executeCommand('toggleVideo');
-      if (!on && !muted) api.executeCommand('toggleVideo');
-    } catch {
-      // Jitsi not ready — ignore.
-    }
-  }, []);
-
-  // Start Jitsi once (never re-init on speaker/status updates).
+  // Start Jitsi once (never re-init on call updates).
   useEffect(() => {
     if (!joined || !call || !name || call.status === 'ended' || jitsiStarted.current) {
       return;
@@ -301,15 +263,14 @@ function RoomInner() {
     };
   }, [joined, call, name]);
 
-  // Realtime channel: presence + speak signals + call updates + chat.
-  // Presence carries {participant_id, name} ONLY — never a phone number.
+  // Realtime channel: presence + call updates + chat.
+  // Presence carries {participant_id, name} ONLY.
   useEffect(() => {
     if (!joined || !callId || !name || !participantId) return;
 
     const channel: RealtimeChannel = supabase.channel(`call:${callId}`, {
       config: { presence: { key: participantId }, broadcast: { self: true } },
     });
-    channelRef.current = channel;
 
     channel
       .on('presence', { event: 'sync' }, () => {
@@ -322,48 +283,6 @@ function RoomInner() {
           }))
           .filter((p) => p.participant_id);
         setParticipants(list);
-      })
-      .on('broadcast', { event: 'grant-speak' }, (payload) => {
-        const data = asRecord(asRecord(payload).payload);
-        if (data.participant_id === participantId && role !== 'admin') {
-          void setMic(true);
-          void setVideo(true);
-        }
-      })
-      .on('broadcast', { event: 'revoke-speak' }, (payload) => {
-        const data = asRecord(asRecord(payload).payload);
-        if (data.participant_id === participantId && role !== 'admin') {
-          void setMic(false);
-          void setVideo(false);
-        }
-      })
-      .on('broadcast', { event: 'mute-all' }, () => {
-        if (role === 'admin') {
-          // Belt and braces: if the admin is in the room as moderator,
-          // Jitsi's own mute-everyone also fires. The self-mute below is
-          // what actually guarantees it for everyone else.
-          try {
-            jitsiApi.current?.executeCommand('muteEveryone', 'audio');
-          } catch {
-            // Not moderator — ignore.
-          }
-        } else {
-          void setMic(false);
-          void setVideo(false);
-        }
-      })
-      .on('broadcast', { event: 'kicked' }, (payload) => {
-        const data = asRecord(asRecord(payload).payload);
-        if (data.participant_id === participantId) {
-          try {
-            jitsiApi.current?.dispose();
-          } catch {
-            // Ignore.
-          }
-          jitsiApi.current = null;
-          void channel.untrack();
-          setKicked(true);
-        }
       })
       .on(
         'postgres_changes',
@@ -379,12 +298,7 @@ function RoomInner() {
             prev
               ? {
                   ...prev,
-                  status:
-                    (row.status as AvrixCall['status']) ?? prev.status,
-                  current_speaker_id:
-                    (row.current_speaker_id as string | null) ?? null,
-                  current_speaker_name:
-                    (row.current_speaker_name as string | null) ?? null,
+                  status: (row.status as AvrixCall['status']) ?? prev.status,
                   ended_at: (row.ended_at as string | null) ?? null,
                 }
               : prev,
@@ -417,9 +331,8 @@ function RoomInner() {
 
     return () => {
       void supabase.removeChannel(channel);
-      channelRef.current = null;
     };
-  }, [joined, callId, name, participantId, role, setMic, setVideo]);
+  }, [joined, callId, name, participantId]);
 
   // Chat history.
   useEffect(() => {
@@ -479,9 +392,6 @@ function RoomInner() {
     }
     router.push('/');
   }
-
-  const isSpeaker =
-    role === 'admin' || call?.current_speaker_id === participantId;
 
   // ---- render states ----
 
@@ -546,36 +456,20 @@ function RoomInner() {
     );
   }
 
-  if (kicked) {
-    return (
-      <div className="mx-auto max-w-3xl px-5 py-16 text-center">
-        <h1 className="font-serif text-2xl font-bold text-white">
-          You were removed from this call.
-        </h1>
-        <p className="mt-2 text-neutral-400">
-          The admin removed you. Your number is free to join again — unless
-          the admin also removed it from the allowlist.
-        </p>
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded bg-gold px-4 py-2 text-sm font-semibold text-black"
-        >
-          Back to calls
-        </Link>
-      </div>
-    );
-  }
-
   if (!joined) {
     return (
       <div className="mx-auto max-w-md px-5 py-16">
-        <h1 className="font-serif text-2xl font-bold text-white">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={AVRIXLAB_LOGO_URL}
+          alt="Avrix Labs"
+          className="h-10 w-auto"
+        />
+        <h1 className="mt-6 font-serif text-2xl font-bold text-white">
           Join “{call.title}”
         </h1>
         <p className="mt-2 text-neutral-400">
-          Enter your name and the phone number registered with AvrixCall.
-          No password, no account — your number is your entry pass. One
-          number takes one seat in this meeting.
+          Just your display name — no account, no password, no rules.
         </p>
         <form onSubmit={joinMeeting} className="mt-6 space-y-3">
           <input
@@ -587,17 +481,6 @@ function RoomInner() {
             maxLength={60}
             placeholder="Your name"
             autoFocus
-            className="w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
-          />
-          <input
-            value={phoneInput}
-            onChange={(e) => {
-              setPhoneInput(e.target.value);
-              setJoinError('');
-            }}
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="Phone number, e.g. 01XXXXXXXXX"
             className="w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
           />
           {joinError && <p className="text-sm text-red-400">{joinError}</p>}
@@ -618,19 +501,15 @@ function RoomInner() {
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 px-4 py-3">
         <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded bg-gold font-serif text-base font-bold text-black">
-            A
-          </span>
-          <div>
-            <h1 className="font-serif text-lg font-bold leading-tight text-white">
-              {call.title}
-            </h1>
-            <p className="text-xs text-neutral-400">
-              {call.current_speaker_name
-                ? `🎙 Now speaking: ${call.current_speaker_name}`
-                : 'No one has the mic yet — the admin gives one person the mic at a time.'}
-            </p>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={AVRIXLAB_LOGO_URL}
+            alt="Avrix Labs"
+            className="h-8 w-auto"
+          />
+          <h1 className="font-serif text-lg font-bold leading-tight text-white">
+            {call.title}
+          </h1>
         </div>
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-400">
@@ -653,26 +532,11 @@ function RoomInner() {
             className="h-[55vh] w-full bg-black lg:h-auto lg:min-h-[70vh] lg:flex-1"
           />
           <div className="border-t border-neutral-800 px-4 py-2 text-sm">
-            {role === 'admin' ? (
-              <p className="text-gold">
-                You are in as admin — manage speakers from the{' '}
-                <Link href="/admin" target="_blank" className="underline">
-                  admin dashboard
-                </Link>
-                . Your own mic and camera are yours to control in the video
-                window.
-              </p>
-            ) : isSpeaker ? (
-              <p className="text-emerald-400">
-                🎙 You have the mic — you can speak and show your camera.
-              </p>
-            ) : (
-              <p className="text-neutral-400">
-                You are muted. The admin controls the mic — only one person
-                speaks at a time.
-                {jitsiJoined ? '' : ' Connecting to video…'}
-              </p>
-            )}
+            <p className="text-neutral-400">
+              Plain Jitsi call — control your own mic and camera in the video
+              window.
+              {jitsiJoined ? '' : ' Connecting to video…'}
+            </p>
             {jitsiError && <p className="mt-1 text-red-400">{jitsiError}</p>}
           </div>
           <div className="border-t border-neutral-800 px-4 py-2">

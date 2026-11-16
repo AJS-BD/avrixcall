@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AvrixCall — Group calls for Avrixlab investors',
+  title: 'AvrixCall',
   description:
-    'Admin-run group calls: one speaker at a time, live text chat for everyone.',
+    'Plain Jitsi group calls with Avrixlab branding. Join a room by name — no account, no rules.',
 };
 
 export default function RootLayout({

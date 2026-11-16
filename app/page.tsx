@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
-import { normalizePhone } from '@/lib/phone';
+import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import type { AvrixCall } from '@/lib/types';
 
 function formatTime(iso: string | null): string {
@@ -23,17 +23,8 @@ export default function Home() {
   const [calls, setCalls] = useState<AvrixCall[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [joinError, setJoinError] = useState('');
-
-  useEffect(() => {
-    // sessionStorage is client-only; read it after mount.
-    queueMicrotask(() => {
-      setName(sessionStorage.getItem('avrixcall_name') ?? '');
-      setPhone(sessionStorage.getItem('avrixcall_phone') ?? '');
-    });
-  }, []);
+  const [roomName, setRoomName] = useState('');
+  const [roomError, setRoomError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -62,34 +53,36 @@ export default function Home() {
     };
   }, []);
 
-  function join(callId: string) {
-    const trimmed = name.trim();
-    const canonical = normalizePhone(phone);
-    if (!trimmed) {
-      setJoinError('Enter your display name first.');
+  function joinByName(e: React.FormEvent) {
+    e.preventDefault();
+    const q = roomName.trim().toLowerCase();
+    if (!q) {
+      setRoomError('Type a room name first.');
       return;
     }
-    if (!canonical) {
-      setJoinError('Enter a valid Bangladeshi phone number.');
+    const match =
+      calls.find((c) => c.title.toLowerCase() === q) ??
+      calls.find((c) => c.room_name.toLowerCase() === q);
+    if (!match) {
+      setRoomError(`No call named “${roomName.trim()}” — pick one from the list below.`);
       return;
     }
-    sessionStorage.setItem('avrixcall_name', trimmed);
-    sessionStorage.setItem('avrixcall_phone', canonical);
-    sessionStorage.setItem('avrixcall_role', 'guest');
-    router.push(`/call/${callId}`);
+    if (match.status !== 'live') {
+      setRoomError(`“${match.title}” hasn't started yet.`);
+      return;
+    }
+    router.push(`/call/${match.id}`);
   }
 
   return (
     <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-5 py-8">
       <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded bg-gold font-serif text-lg font-bold text-black">
-            A
-          </span>
-          <span className="font-serif text-2xl font-bold tracking-wide text-white">
-            Avrix<span className="text-gold">Call</span>
-          </span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={AVRIXLAB_LOGO_URL}
+          alt="Avrix Labs"
+          className="h-10 w-auto"
+        />
         <Link
           href="/admin"
           className="rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-gold hover:text-gold"
@@ -99,52 +92,53 @@ export default function Home() {
       </header>
 
       <main className="mt-10 flex-1">
-        <h1 className="font-serif text-3xl font-bold leading-snug text-white sm:text-4xl">
-          Group calls, run by the admin.
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={AVRIXLAB_LOGO_URL}
+          alt="Avrix Labs"
+          className="h-14 w-auto sm:h-16"
+        />
+        <h1 className="mt-6 font-serif text-3xl font-bold leading-snug text-white sm:text-4xl">
+          Group calls, plain and simple.
         </h1>
         <p className="mt-3 max-w-xl text-neutral-400">
-          One speaker at a time, chosen by the admin. Everyone else listens
-          — and everyone can text in the group chat the whole time.
+          Join a room by name — no account, no password, no rules. Video
+          runs on Jitsi; everyone can text in the group chat the whole time.
         </p>
 
-        <div className="mt-8 rounded-lg border border-neutral-800 bg-panel p-4">
+        <form
+          onSubmit={joinByName}
+          className="mt-8 rounded-lg border border-neutral-800 bg-panel p-4"
+        >
           <label
-            htmlFor="display-name"
+            htmlFor="room-name"
             className="text-sm font-medium text-neutral-300"
           >
-            Your name and registered phone number
+            Join a room by name
           </label>
-          <input
-            id="display-name"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setJoinError('');
-            }}
-            maxLength={60}
-            placeholder="e.g. Xafor"
-            className="mt-2 w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
-          />
-          <input
-            id="phone-number"
-            value={phone}
-            onChange={(e) => {
-              setPhone(e.target.value);
-              setJoinError('');
-            }}
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="Phone, e.g. 01XXXXXXXXX"
-            className="mt-2 w-full rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
-          />
-          <p className="mt-2 text-xs text-neutral-500">
-            No password, no account — your registered number is your entry
-            pass. One number holds one seat at a time.
-          </p>
-          {joinError && (
-            <p className="mt-2 text-sm text-red-400">{joinError}</p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              id="room-name"
+              value={roomName}
+              onChange={(e) => {
+                setRoomName(e.target.value);
+                setRoomError('');
+              }}
+              maxLength={200}
+              placeholder="Room name, e.g. Weekly market update"
+              className="min-w-0 flex-1 rounded border border-neutral-700 bg-black px-3 py-2 text-white outline-none placeholder:text-neutral-600 focus:border-gold"
+            />
+            <button
+              type="submit"
+              className="shrink-0 rounded bg-gold px-4 py-2 text-sm font-semibold text-black hover:brightness-110"
+            >
+              Join meeting
+            </button>
+          </div>
+          {roomError && (
+            <p className="mt-2 text-sm text-red-400">{roomError}</p>
           )}
-        </div>
+        </form>
 
         <h2 className="mt-10 font-serif text-xl font-bold text-white">
           Calls
@@ -184,14 +178,12 @@ export default function Home() {
                   </div>
                   <p className="mt-1 text-sm text-neutral-400">
                     {live
-                      ? call.current_speaker_name
-                        ? `Now speaking: ${call.current_speaker_name}`
-                        : 'Live now — waiting for the admin to give someone the mic.'
+                      ? 'Live now — click Join to enter the room.'
                       : `Starts ${formatTime(call.scheduled_at)}`}
                   </p>
                 </div>
                 <button
-                  onClick={() => join(call.id)}
+                  onClick={() => router.push(`/call/${call.id}`)}
                   disabled={!live}
                   className="shrink-0 rounded bg-gold px-4 py-2 text-sm font-semibold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -204,8 +196,8 @@ export default function Home() {
       </main>
 
       <footer className="mt-12 border-t border-neutral-800 pt-4 text-xs text-neutral-500">
-        Small-scale test — free Jitsi server, up to 100 people per call. A
-        group-call tool for Avrixlab investors.
+        Plain Jitsi group calls for Avrixlab investors — no account, no
+        rules. Video runs on the free Jitsi server.
       </footer>
     </div>
   );

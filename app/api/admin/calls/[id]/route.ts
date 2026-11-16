@@ -25,15 +25,6 @@ export async function PATCH(
       current_speaker_id: null,
       current_speaker_name: null,
     };
-  } else if (action === 'set-speaker') {
-    const speakerId =
-      typeof body?.speaker_id === 'string' ? body.speaker_id : null;
-    const speakerName =
-      typeof body?.speaker_name === 'string' ? body.speaker_name : null;
-    patch = {
-      current_speaker_id: speakerId,
-      current_speaker_name: speakerName,
-    };
   } else {
     return NextResponse.json(
       { error: 'Unknown action.' },
