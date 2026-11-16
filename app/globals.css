@@ -383,3 +383,85 @@ button:focus-visible {
     transform: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Room side panel — tabs, people rows, chat bubbles.                  */
+/* ------------------------------------------------------------------ */
+
+/* Tab buttons in the room side panel. */
+.side-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 2px solid transparent;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #9a958a;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+.side-tab:hover {
+  color: #ede8dc;
+}
+.side-tab:focus-visible {
+  outline: 2px solid #f2d879;
+  outline-offset: -2px;
+}
+.side-tab--active {
+  color: #f2d879;
+  border-bottom-color: #d4af37;
+}
+
+/* Avatar circle with initials. Size + colors come from inline style. */
+.avatar-circle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+.avatar-speaking {
+  box-shadow:
+    0 0 0 2px #050505,
+    0 0 0 4px #d4af37;
+}
+
+/* One person in the participants list. */
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.875rem;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+.person-row:hover {
+  background: #121210;
+}
+.person-row--speaking {
+  border-color: rgba(212, 175, 55, 0.55);
+  background: rgba(212, 175, 55, 0.07);
+}
+
+/* Chat bubbles — others on the left, yours gold-tinted on the right. */
+.chat-bubble {
+  border: 1px solid #26241f;
+  background: #121210;
+  border-radius: 1rem;
+  border-top-left-radius: 0.25rem;
+}
+.chat-bubble-own {
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  background: #241d0b;
+  border-radius: 1rem;
+  border-top-right-radius: 0.25rem;
+}

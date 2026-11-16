@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -14,6 +15,7 @@ import {
   LiveKitRoom,
   VideoConference,
   useParticipants,
+  useSpeakingParticipants,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { supabase } from '@/lib/supabase-client';
@@ -31,23 +33,222 @@ function formatTime(iso: string): string {
   });
 }
 
+/** Rich participant info reported up from LiveKit for the side panel. */
+interface ParticipantInfo {
+  id: string;
+  name: string;
+  isSpeaking: boolean;
+  micOn: boolean;
+  camOn: boolean;
+  isLocal: boolean;
+  isAdmin: boolean;
+}
+
 // Inside <LiveKitRoom>: reports the LiveKit participant list up to the
-// page so the "In this call" chips render from LiveKit, not Supabase.
+// page so the side panel renders from LiveKit, not Supabase.
 function ParticipantTracker({
   onChange,
 }: {
-  onChange: (list: { id: string; name: string }[]) => void;
+  onChange: (list: ParticipantInfo[]) => void;
 }) {
   const participants = useParticipants();
+  const speaking = useSpeakingParticipants();
+  const speakingIds = useMemo(
+    () => new Set(speaking.map((p) => p.identity)),
+    [speaking],
+  );
+  // Skip redundant reports — LiveKit hands us a new array identity on
+  // every room event, and with 60–80 people we don't want to re-render
+  // the whole room for a change that isn't one.
+  const lastReport = useRef('');
   useEffect(() => {
-    onChange(
-      participants.map((p) => ({
-        id: p.identity,
-        name: p.name || 'Guest',
-      })),
-    );
-  }, [participants, onChange]);
+    const list: ParticipantInfo[] = participants.map((p) => ({
+      id: p.identity,
+      name: p.name || 'Guest',
+      isSpeaking: speakingIds.has(p.identity),
+      micOn: p.isMicrophoneEnabled,
+      camOn: p.isCameraEnabled,
+      isLocal: p.isLocal,
+      isAdmin: p.identity === 'admin',
+    }));
+    const key = JSON.stringify(list);
+    if (key === lastReport.current) return;
+    lastReport.current = key;
+    onChange(list);
+  }, [participants, speakingIds, onChange]);
   return null;
+}
+
+// ---- avatar helpers (deterministic initials + colour per name) ----
+
+const AVATAR_COLORS = [
+  { bg: '#2a2410', fg: '#f2d879' },
+  { bg: '#052e16', fg: '#4ade80' },
+  { bg: '#0c2d3a', fg: '#7dd3fc' },
+  { bg: '#3b0f1e', fg: '#fda4af' },
+  { bg: '#241a3a', fg: '#c4b5fd' },
+  { bg: '#33230a', fg: '#fbbf24' },
+];
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const first = parts[0][0] ?? '?';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '';
+  return (first + last).toUpperCase();
+}
+
+function avatarColorOf(name: string) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+function Avatar({
+  name,
+  size = 36,
+  speaking = false,
+}: {
+  name: string;
+  size?: number;
+  speaking?: boolean;
+}) {
+  const c = avatarColorOf(name);
+  return (
+    <span
+      aria-hidden
+      className={`avatar-circle${speaking ? ' avatar-speaking' : ''}`}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: c.bg,
+        color: c.fg,
+        fontSize: Math.round(size * 0.36),
+      }}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+// ---- mic / camera state icons ----
+
+function MicIcon({ on, className }: { on: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-label={on ? 'Microphone on' : 'Microphone off'}
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 19v3" />
+      {!on && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
+  );
+}
+
+function CamIcon({ on, className }: { on: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-label={on ? 'Camera on' : 'Camera off'}
+    >
+      <rect x="2" y="6" width="13" height="12" rx="2" />
+      <path d="m15 10 7-3v10l-7-3" />
+      {!on && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
+  );
+}
+
+// ---- one row of the participants list ----
+
+function ParticipantRow({ p }: { p: ParticipantInfo }) {
+  return (
+    <li
+      className={`person-row${p.isSpeaking ? ' person-row--speaking' : ''}`}
+    >
+      <Avatar name={p.name} size={36} speaking={p.isSpeaking} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium text-cream">
+            {p.name}
+          </span>
+          {p.isLocal && (
+            <span className="pill pill-gold shrink-0">YOU</span>
+          )}
+          {p.isAdmin && (
+            <span className="pill pill-gold shrink-0">ADMIN</span>
+          )}
+        </span>
+        <span className="mt-0.5 block text-xs text-muted">
+          {p.isSpeaking ? (
+            <span className="inline-flex items-center gap-1.5 font-medium text-emerald">
+              <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-emerald" />
+              Speaking…
+            </span>
+          ) : !p.micOn ? (
+            'Muted'
+          ) : (
+            'In the call'
+          )}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2.5">
+        <MicIcon
+          on={p.micOn}
+          className={`h-4 w-4 ${p.micOn ? 'text-muted' : 'text-[#e08a80]'}`}
+        />
+        <CamIcon
+          on={p.camOn}
+          className={`h-4 w-4 ${p.camOn ? 'text-muted' : 'text-[#e08a80]'}`}
+        />
+      </span>
+    </li>
+  );
+}
+
+// ---- one chat message: avatar + bubble, yours gold-tinted on the right ----
+
+function ChatMessageBubble({ m, own }: { m: CallMessage; own: boolean }) {
+  return (
+    <div className={`flex gap-2.5 ${own ? 'flex-row-reverse' : ''}`}>
+      <Avatar name={m.sender_name} size={32} />
+      <div className="min-w-0 max-w-[82%]">
+        <div
+          className={`flex flex-wrap items-baseline gap-x-2 ${own ? 'justify-end' : ''}`}
+        >
+          <span className="text-[13px] font-semibold text-goldlight">
+            {m.sender_name}
+          </span>
+          {m.sender_role === 'admin' && (
+            <span className="pill pill-gold">ADMIN</span>
+          )}
+          <span className="text-[11px] text-muted">
+            {formatTime(m.created_at)}
+          </span>
+        </div>
+        <div
+          className={`mt-1 px-3.5 py-2 ${own ? 'chat-bubble-own' : 'chat-bubble'}`}
+        >
+          <p className="break-words text-sm leading-relaxed text-cream">
+            {m.body}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RoomInner() {
@@ -75,22 +276,69 @@ function RoomInner() {
   const [joinBusy, setJoinBusy] = useState(false);
 
   const [messages, setMessages] = useState<CallMessage[]>([]);
-  const [participants, setParticipants] = useState<
-    { id: string; name: string }[]
-  >([]);
+  const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatError, setChatError] = useState('');
+
+  // Side panel: People | Chat tabs, unread badge, people search.
+  const [activeTab, setActiveTab] = useState<'participants' | 'chat'>(
+    'participants',
+  );
+  const [unread, setUnread] = useState(0);
+  const [peopleSearch, setPeopleSearch] = useState('');
+  const unreadInit = useRef(false);
+  const prevMsgCount = useRef(0);
+  // Only auto-scroll the chat when the reader is already near the
+  // bottom, so reading older messages isn't yanked away.
+  const stickToBottom = useRef(true);
+
+  const isOwnMessage = useCallback(
+    (m: CallMessage) =>
+      role === 'admin'
+        ? m.sender_role === 'admin'
+        : m.participant_id === participantId,
+    [role, participantId],
+  );
+
+  // Unread chat badge: count messages from others that arrive while the
+  // chat tab is not open. The first load (history) is not "new".
+  useEffect(() => {
+    if (!unreadInit.current) {
+      unreadInit.current = true;
+      prevMsgCount.current = messages.length;
+      return;
+    }
+    if (messages.length > prevMsgCount.current) {
+      const fresh = messages.slice(prevMsgCount.current);
+      const fromOthers = fresh.filter((m) => !isOwnMessage(m)).length;
+      if (fromOthers > 0 && activeTab !== 'chat') {
+        setUnread((u) => u + fromOthers);
+      }
+    }
+    prevMsgCount.current = messages.length;
+  }, [messages, activeTab, isOwnMessage]);
+
+  // Speaking people first, then the admin, then the rest alphabetically
+  // — so at 60–80 people the person talking is always at the top.
+  const sortedParticipants = useMemo(() => {
+    const q = peopleSearch.trim().toLowerCase();
+    const filtered = q
+      ? participants.filter((p) => p.name.toLowerCase().includes(q))
+      : participants;
+    return [...filtered].sort((a, b) => {
+      if (a.isSpeaking !== b.isSpeaking) return a.isSpeaking ? -1 : 1;
+      if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [participants, peopleSearch]);
 
   const chatBox = useRef<HTMLDivElement | null>(null);
   // Keep the current participant row handy for the beforeunload beacon.
   const seatRef = useRef({ callId: '', participantId: '' });
 
-  const onParticipantsChange = useCallback(
-    (list: { id: string; name: string }[]) => {
-      setParticipants(list);
-    },
-    [],
-  );
+  const onParticipantsChange = useCallback((list: ParticipantInfo[]) => {
+    setParticipants(list);
+  }, []);
 
   // Load the call.
   useEffect(() => {
@@ -340,11 +588,18 @@ function RoomInner() {
       });
   }, [callId]);
 
-  // Auto-scroll chat to the newest message.
+  // Auto-scroll chat to the newest message — only when the reader is
+  // already near the bottom (see stickToBottom).
+  const onChatScroll = useCallback(() => {
+    const el = chatBox.current;
+    if (!el) return;
+    stickToBottom.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+  }, []);
   useEffect(() => {
     const el = chatBox.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [messages, activeTab]);
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
@@ -574,78 +829,167 @@ function RoomInner() {
               <p className="text-sm text-red-400">{videoError}</p>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 px-1">
-            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
-              In this call ({participants.length})
-            </span>
-            {participants.length > 0 ? (
-              participants.map((p) => (
-                <span key={p.id} className="pill pill-muted">
-                  {p.name}
-                </span>
-              ))
-            ) : (
-              <span className="text-xs text-muted">just you so far</span>
-            )}
-          </div>
         </div>
 
-        <aside className="flex h-[45vh] w-full flex-col border-t border-line bg-panel lg:h-auto lg:w-[380px] lg:border-l lg:border-t-0">
-          <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <h2 className="font-display text-base font-semibold text-cream">
-              Group chat
-            </h2>
-            <span className="pill pill-muted">
-              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-            </span>
-          </div>
+        <aside className="flex h-[58vh] w-full flex-col border-t border-line bg-panel lg:h-auto lg:w-[400px] lg:border-l lg:border-t-0">
+          {/* Tabs: People | Chat (with unread badge). */}
           <div
-            ref={chatBox}
-            className="flex-1 space-y-3 overflow-y-auto px-4 py-3"
+            role="tablist"
+            aria-label="Call side panel"
+            className="flex items-center gap-1 border-b border-line px-3 pt-2"
           >
-            {messages.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted">
-                No messages yet — say hello. Everyone in the call can text
-                here.
-              </p>
-            )}
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className="rounded-xl border border-line bg-panel2 px-3 py-2"
-              >
-                <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="text-sm font-semibold text-goldlight">
-                    {m.sender_name}
-                  </span>
-                  {m.sender_role === 'admin' && (
-                    <span className="pill pill-gold">ADMIN</span>
-                  )}
-                  <span className="text-xs text-muted">
-                    {formatTime(m.created_at)}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'participants'}
+              onClick={() => setActiveTab('participants')}
+              className={`side-tab${activeTab === 'participants' ? ' side-tab--active' : ''}`}
+            >
+              People
+              <span className="ml-1 rounded-full bg-panel2 px-2 py-0.5 text-xs font-semibold text-cream">
+                {participants.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'chat'}
+              onClick={() => {
+                setActiveTab('chat');
+                setUnread(0);
+              }}
+              className={`side-tab${activeTab === 'chat' ? ' side-tab--active' : ''}`}
+            >
+              Chat
+              {unread > 0 ? (
+                <span className="ml-1 rounded-full bg-gold px-2 py-0.5 text-xs font-bold text-ink">
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              ) : (
+                <span className="ml-1 rounded-full bg-panel2 px-2 py-0.5 text-xs font-semibold text-cream">
+                  {messages.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {activeTab === 'participants' ? (
+            <>
+              <div className="border-b border-line px-4 pb-3 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-display text-base font-semibold text-cream">
+                    In this call
+                  </h2>
+                  <span className="pill pill-green">
+                    <span className="pulse-dot mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald" />
+                    {participants.length} live
                   </span>
                 </div>
-                <p className="mt-1 break-words text-sm text-cream">{m.body}</p>
+                <div className="relative mt-3">
+                  <input
+                    value={peopleSearch}
+                    onChange={(e) => setPeopleSearch(e.target.value)}
+                    placeholder="Search people…"
+                    aria-label="Search people"
+                    className="field mt-0 w-full pr-9 text-sm"
+                  />
+                  {peopleSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setPeopleSearch('')}
+                      aria-label="Clear search"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-1.5 text-lg leading-none text-muted hover:text-cream"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-muted">
+                  {peopleSearch
+                    ? `${sortedParticipants.length} of ${participants.length} shown`
+                    : `${participants.length} ${participants.length === 1 ? 'person' : 'people'} in this call`}
+                </p>
               </div>
-            ))}
-          </div>
-          <form onSubmit={sendMessage} className="border-t border-line p-3">
-            <div className="flex gap-2">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                maxLength={1000}
-                placeholder="Message everyone…"
-                className="field mt-0 min-w-0 flex-1"
-              />
-              <button type="submit" className="btn-primary btn-sm shrink-0">
-                Send
-              </button>
-            </div>
-            {chatError && (
-              <p className="mt-2 text-xs text-red-400">{chatError}</p>
-            )}
-          </form>
+              <ul className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
+                {sortedParticipants.length === 0 ? (
+                  <li className="py-8 text-center text-sm text-muted">
+                    {peopleSearch
+                      ? `No one matches “${peopleSearch}”.`
+                      : 'Just you so far.'}
+                  </li>
+                ) : (
+                  sortedParticipants.map((p) => (
+                    <ParticipantRow key={p.id} p={p} />
+                  ))
+                )}
+              </ul>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                <h2 className="font-display text-base font-semibold text-cream">
+                  Group chat
+                </h2>
+                <span className="pill pill-muted">
+                  {messages.length}{' '}
+                  {messages.length === 1 ? 'message' : 'messages'}
+                </span>
+              </div>
+              <div
+                ref={chatBox}
+                onScroll={onChatScroll}
+                className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
+              >
+                {messages.length === 0 && (
+                  <div className="py-10 text-center">
+                    <p className="font-display text-lg font-semibold text-cream">
+                      Say hello 👋
+                    </p>
+                    <p className="mt-1 text-sm text-muted">
+                      No messages yet — everyone in the call can text here.
+                    </p>
+                  </div>
+                )}
+                {messages.map((m) => (
+                  <ChatMessageBubble
+                    key={m.id}
+                    m={m}
+                    own={isOwnMessage(m)}
+                  />
+                ))}
+              </div>
+              <form onSubmit={sendMessage} className="border-t border-line p-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    maxLength={1000}
+                    placeholder="Message everyone…"
+                    aria-label="Message everyone"
+                    className="field mt-0 min-w-0 flex-1"
+                  />
+                  <button
+                    type="submit"
+                    className="btn-primary shrink-0"
+                    aria-label="Send message"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      className="h-4 w-4"
+                      aria-hidden
+                    >
+                      <path d="M3.4 20.4l17.4-7.5c.8-.35.8-1.45 0-1.8L3.4 3.6c-.66-.29-1.39.2-1.45.92L1.9 9.5c-.05.48.24.93.7 1.1L15 12 2.6 13.4c-.46.17-.75.62-.7 1.1l.05 4.98c.06.72.79 1.21 1.45.92z" />
+                    </svg>
+                    Send
+                  </button>
+                </div>
+                {chatError && (
+                  <p className="mt-2 text-xs text-red-400">{chatError}</p>
+                )}
+              </form>
+            </>
+          )}
         </aside>
       </div>
     </div>
