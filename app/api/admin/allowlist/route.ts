@@ -23,7 +23,21 @@ export async function GET() {
       { status: 500 },
     );
   }
-  return NextResponse.json({ members: data ?? [] });
+  // Merge face enrollment status (booleans only — descriptors are
+  // biometric data and never leave the server). If the face table is
+  // not there yet (migration 0003 not run), everyone reads as not
+  // enrolled rather than failing the whole member list.
+  const { data: faceRows } = await db
+    .from('avrix_call_face_profiles')
+    .select('phone');
+  const enrolledPhones = new Set(
+    (faceRows ?? []).map((r) => r.phone as string),
+  );
+  const members = (data ?? []).map((m) => ({
+    ...m,
+    face_enrolled: enrolledPhones.has(m.phone),
+  }));
+  return NextResponse.json({ members });
 }
 
 export async function POST(req: Request) {

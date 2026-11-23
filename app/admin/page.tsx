@@ -35,6 +35,7 @@ interface Member {
   phone: string;
   name: string | null;
   created_at: string;
+  face_enrolled?: boolean;
 }
 
 function formatPhone(phone: string): string {
@@ -155,6 +156,22 @@ export default function AdminPage() {
     setMemberPhone('');
     setMemberName('');
     setMemberMessage('Member added — they can join with their number.');
+  }
+
+  async function removeFace(phone: string) {
+    const res = await fetch('/api/face/enroll', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone }),
+    });
+    if (!res.ok) {
+      setMemberMessage('Could not remove the face enrollment.');
+      return;
+    }
+    setMembers((prev) =>
+      prev.map((m) => (m.phone === phone ? { ...m, face_enrolled: false } : m)),
+    );
+    setMemberMessage('Face enrollment removed — that member joins by phone only until they enroll again.');
   }
 
   async function removeMember(phone: string) {
@@ -708,13 +725,30 @@ export default function AdminPage() {
                   <p className="mt-1 font-mono text-sm text-muted">
                     {formatPhone(m.phone)}
                   </p>
+                  <p className="mt-2">
+                    {m.face_enrolled ? (
+                      <span className="pill pill-green">Face enrolled</span>
+                    ) : (
+                      <span className="pill pill-muted">No face yet</span>
+                    )}
+                  </p>
                 </div>
-                <button
-                  onClick={() => void removeMember(m.phone)}
-                  className="btn-danger btn-sm shrink-0"
-                >
-                  Remove
-                </button>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {m.face_enrolled && (
+                    <button
+                      onClick={() => void removeFace(m.phone)}
+                      className="btn-ghost btn-sm shrink-0"
+                    >
+                      Remove face
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void removeMember(m.phone)}
+                    className="btn-danger btn-sm shrink-0"
+                  >
+                    Remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

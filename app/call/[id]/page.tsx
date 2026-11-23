@@ -19,6 +19,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { supabase } from '@/lib/supabase-client';
+import FaceScan from '@/components/FaceScan';
 import { AVRIXLAB_LOGO_URL } from '@/lib/brand';
 import {
   callStartMs,
@@ -298,6 +299,11 @@ function RoomInner() {
   const [phoneInput, setPhoneInput] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
+  // Face verification (MVP): only for numbers with a face enrolled.
+  // faceNeeded = the status check (or a server 428) says a scan is
+  // required; faceDescriptor holds the captured scan until join succeeds.
+  const [faceNeeded, setFaceNeeded] = useState(false);
+  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
 
   const [messages, setMessages] = useState<CallMessage[]>([]);
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
@@ -474,7 +480,19 @@ function RoomInner() {
       })
         .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
         .then(({ ok, data }) => {
-          if (cancelled || !ok) return;
+          if (cancelled) return;
+          if (!ok) {
+            // Face-enrolled members cannot silently rejoin — the server
+            // answers 428 face_required. Fall back to the join form with
+            // the face scan step instead of retrying in a loop.
+            if (data?.face_required) {
+              setFaceNeeded(true);
+              setJoinError(
+                'Face verification is required for this number — complete the face scan below to rejoin.',
+              );
+            }
+            return;
+          }
           setName(data.name as string);
           setRole('guest');
           setParticipantId(data.participant_id as string);
@@ -495,27 +513,26 @@ function RoomInner() {
     };
   }, [call, id, searchParams]);
 
-  async function joinMeeting(e: React.FormEvent) {
-    e.preventDefault();
+  async function doJoin(descriptor: number[] | undefined) {
     const trimmedName = nameInput.trim();
-    if (!trimmedName) {
-      setJoinError('Enter your name.');
-      return;
-    }
-    if (!phoneInput.trim()) {
-      setJoinError('Enter your phone number.');
-      return;
-    }
     setJoinBusy(true);
     setJoinError('');
     const res = await fetch(`/api/calls/${id}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmedName, phone: phoneInput.trim() }),
+      body: JSON.stringify({
+        name: trimmedName,
+        phone: phoneInput.trim(),
+        ...(descriptor ? { face_descriptor: descriptor } : {}),
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setJoinBusy(false);
     if (!res.ok) {
+      if (data?.face_required) setFaceNeeded(true);
+      // A failed match means the captured scan is spent — clear it so
+      // the member scans again instead of resubmitting a stale one.
+      if (data?.face_mismatch) setFaceDescriptor(null);
       setJoinError((data?.error as string) || 'Could not join the call.');
       return;
     }
@@ -535,6 +552,47 @@ function RoomInner() {
     setLivekitToken(data.token as string);
     setLivekitUrl(data.url as string);
     setJoined(true);
+  }
+
+  async function joinMeeting(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmedName = nameInput.trim();
+    if (!trimmedName) {
+      setJoinError('Enter your name.');
+      return;
+    }
+    if (!phoneInput.trim()) {
+      setJoinError('Enter your phone number.');
+      return;
+    }
+    // Already scanned in this form session — go straight to the join.
+    if (faceNeeded && faceDescriptor) {
+      await doJoin(faceDescriptor);
+      return;
+    }
+    if (faceNeeded) {
+      setJoinError('Complete the face scan below first, then join.');
+      return;
+    }
+    // First submit for this number: check whether a face scan is
+    // required. Not registered / not enrolled → join exactly as before.
+    setJoinBusy(true);
+    setJoinError('');
+    const statusRes = await fetch(
+      `/api/face/status?phone=${encodeURIComponent(phoneInput.trim())}`,
+    ).catch(() => null);
+    setJoinBusy(false);
+    const status = statusRes?.ok
+      ? await statusRes.json().catch(() => ({}))
+      : {};
+    if (status?.registered && status?.enrolled) {
+      setFaceNeeded(true);
+      setJoinError(
+        'This number has face verification — complete the face scan below to join.',
+      );
+      return;
+    }
+    await doJoin(undefined);
   }
 
   // Mark the participant row closed. Best effort on page close (beacon)
@@ -803,6 +861,10 @@ function RoomInner() {
               onChange={(e) => {
                 setPhoneInput(e.target.value);
                 setJoinError('');
+                // A different number may not need a face (or needs a
+                // different one) — reset the face step on any change.
+                setFaceNeeded(false);
+                setFaceDescriptor(null);
               }}
               inputMode="tel"
               autoComplete="tel"
@@ -810,6 +872,21 @@ function RoomInner() {
               placeholder="Phone number, e.g. 01XXXXXXXXX"
               className="field"
             />
+            {faceNeeded &&
+              (faceDescriptor ? (
+                <p className="text-sm text-emerald">
+                  Face captured — press Join meeting to continue.
+                </p>
+              ) : (
+                <FaceScan
+                  mode="verify"
+                  onDescriptor={(d) => {
+                    setFaceDescriptor(d);
+                    void doJoin(d);
+                  }}
+                  onError={(m) => setJoinError(m)}
+                />
+              ))}
             {joinError && <p className="text-sm text-red-400">{joinError}</p>}
             <button
               type="submit"
@@ -819,6 +896,16 @@ function RoomInner() {
               {joinBusy ? 'Checking…' : 'Join meeting'}
             </button>
           </form>
+          <p className="mt-4 text-sm text-muted">
+            No face enrolled yet?{' '}
+            <Link
+              href="/enroll"
+              className="font-semibold text-goldlight underline underline-offset-4"
+            >
+              Enroll your face
+            </Link>{' '}
+            so a typed number alone can&apos;t join as you.
+          </p>
         </div>
       </div>
     );

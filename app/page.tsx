@@ -138,6 +138,18 @@ export default function Home() {
               </p>
             )}
           </form>
+
+          <p className="mt-5 max-w-2xl text-sm text-muted">
+            Registered members can also{' '}
+            <Link
+              href="/enroll"
+              className="font-semibold text-goldlight underline underline-offset-4"
+            >
+              enroll your face
+            </Link>{' '}
+            — after that, joining with your number also needs a quick face
+            scan, so a typed number alone is not enough.
+          </p>
         </section>
 
         {/* Stats — counts only, no calls listed */}

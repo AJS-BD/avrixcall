@@ -125,6 +125,53 @@ npm run dev
 - `POST /api/admin/calls`, `PATCH /api/admin/calls/[id]` — create,
   start, end (admin).
 
+## Face verification (MVP)
+
+An optional second check on top of the phone number, for members who
+enroll a face:
+
+- **Browser-only model.** Face detection and the face descriptor are
+  computed entirely in the member's browser with
+  `@vladmandic/face-api` (models loaded from the jsDelivr CDN). No
+  photo or video is ever uploaded, sent to a cloud face service, or
+  stored.
+- **Descriptor-only storage.** Enrollment (`/enroll`, explicit consent
+  required) stores only the 128-number descriptor in
+  `avrix_call_face_profiles`, keyed by phone number, with the consent
+  timestamp. The table has RLS on and no policies — server routes with
+  the service-role key only — and the stored descriptor is **never
+  returned to any client**: `/api/face/status` returns booleans only,
+  and matching happens on the server.
+- **How joining changes.** The join route compares the scan's
+  descriptor against the enrolled one with Euclidean distance;
+  **threshold 0.6** (`FACE_MATCH_THRESHOLD` in `lib/face.ts`). Enrolled
+  member + no scan → `428 face_required`; scan that does not match →
+  blocked, logged in `avrix_call_blocked_attempts` as `face_mismatch`,
+  `403`. The check runs before any LiveKit token is minted, including
+  on the stored-session rejoin path.
+- **Basic liveness, honest limits.** The scan asks the member to look
+  straight, then turn their head slightly, and requires a measurable
+  landmark shift within ~10 seconds. That defeats a still photo held
+  to the camera, but it is **not strong anti-spoofing**: a video
+  replay, or a **stolen descriptor replayed** by a technical attacker
+  (the descriptor is just numbers the client sends), could pass. The
+  descriptor is a shared secret of sorts — treat it like one. Stronger
+  liveness (challenge-response, depth, server-issued nonces) is future
+  work, as is SMS OTP.
+- **Gradual rollout.** Members who have not enrolled join by phone
+  exactly as before — face only becomes mandatory for a number once
+  that number enrolls. There is no flag day and no lockout.
+- **Setup.** Migration `supabase/migrations/0003_face_profiles.sql`
+  must be run in the Supabase SQL editor before the feature works
+  live (it creates the face table and widens the blocked-attempt
+  reasons). Until then, enrollment and face-required joins fail, and
+  the admin member list simply shows everyone as not enrolled.
+- **Admin removal path.** The admin dashboard's Members list shows a
+  "Face enrolled" / "No face yet" pill per member, with a **Remove
+  face** button (`DELETE /api/face/enroll`, admin-only) that deletes
+  the enrollment — the member goes back to phone-only joining until
+  they enroll again.
+
 ## Honest limitations
 
 - **LiveKit free tier.** 5,000 participant-minutes a month (each person

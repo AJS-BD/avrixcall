@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase-server';
 import { normalizePhone } from '@/lib/phone';
 import { getLiveKitUrl, mintLiveKitToken } from '@/lib/livekit-token';
+import {
+  FACE_MATCH_THRESHOLD,
+  euclideanDistance,
+  isValidDescriptor,
+} from '@/lib/face';
 
 // GET /api/calls/[id]/join?participant_id=...
 // Verifies a stored participant row is still active (used on page reload
@@ -61,6 +66,10 @@ export async function POST(
     typeof body?.phone === 'string' ? normalizePhone(body.phone) : null;
   const existingPid =
     typeof body?.participant_id === 'string' ? body.participant_id : null;
+  // Optional face descriptor (128 numbers from the browser scan). Only
+  // required when this number has a face enrolled — see the face check
+  // below. `undefined` = not supplied at all.
+  const faceDescriptor: unknown = body?.face_descriptor;
 
   if (!name || name.length > 60) {
     return NextResponse.json({ error: 'Enter your name.' }, { status: 400 });
@@ -115,6 +124,65 @@ export async function POST(
     );
   }
 
+  // Face verification (MVP, gradual rollout): if this number has a face
+  // enrolled, a matching browser scan is required BEFORE any token is
+  // minted — on the fresh-join path and the idempotent-rejoin path
+  // alike. Members with no face enrolled proceed exactly as before.
+  // The stored descriptor never leaves the server; the client-supplied
+  // descriptor is compared here with Euclidean distance.
+  const { data: faceProfile } = await db
+    .from('avrix_call_face_profiles')
+    .select('descriptor')
+    .eq('phone', phone)
+    .maybeSingle();
+  const faceEnrolled = !!faceProfile;
+  if (faceProfile) {
+    if (faceDescriptor === undefined || faceDescriptor === null) {
+      await db.from('avrix_call_blocked_attempts').insert({
+        call_id: id,
+        phone,
+        attempted_name: name,
+        reason: 'face_required',
+      });
+      return NextResponse.json(
+        {
+          error:
+            'Face verification is required for this number — complete the face scan to join.',
+          face_required: true,
+        },
+        { status: 428 },
+      );
+    }
+    if (!isValidDescriptor(faceDescriptor)) {
+      return NextResponse.json(
+        { error: 'That face scan did not come through properly — try the scan again.' },
+        { status: 400 },
+      );
+    }
+    const stored = faceProfile.descriptor as unknown;
+    if (!isValidDescriptor(stored)) {
+      return NextResponse.json(
+        { error: 'Your enrolled face data is unreadable — ask the admin to re-enroll your face.' },
+        { status: 500 },
+      );
+    }
+    if (euclideanDistance(stored, faceDescriptor) > FACE_MATCH_THRESHOLD) {
+      await db.from('avrix_call_blocked_attempts').insert({
+        call_id: id,
+        phone,
+        attempted_name: name,
+        reason: 'face_mismatch',
+      });
+      return NextResponse.json(
+        {
+          error: 'That face did not match the enrolled face for this number.',
+          face_mismatch: true,
+        },
+        { status: 403 },
+      );
+    }
+  }
+
   const livekitUrl = getLiveKitUrl();
   if (!livekitUrl) {
     return NextResponse.json(
@@ -150,6 +218,7 @@ export async function POST(
         token,
         url: livekitUrl,
         roomName: call.room_name,
+        face_enrolled: faceEnrolled,
       });
     }
   }
@@ -189,5 +258,6 @@ export async function POST(
     token,
     url: livekitUrl,
     roomName: call.room_name,
+    face_enrolled: faceEnrolled,
   });
 }
