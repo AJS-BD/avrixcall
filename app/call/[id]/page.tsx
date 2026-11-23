@@ -12,11 +12,16 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import {
+  ControlBar,
+  GridLayout,
   LiveKitRoom,
-  VideoConference,
+  ParticipantTile,
+  RoomAudioRenderer,
   useParticipants,
   useSpeakingParticipants,
+  useTracks,
 } from '@livekit/components-react';
+import { Track } from 'livekit-client';
 import '@livekit/components-styles';
 import { supabase } from '@/lib/supabase-client';
 import FaceScan from '@/components/FaceScan';
@@ -84,6 +89,22 @@ function ParticipantTracker({
     onChange(list);
   }, [participants, speakingIds, onChange]);
   return null;
+}
+
+// Inside <LiveKitRoom>: the video tiles only — camera + screen-share
+// tracks in a grid. The mic/camera controls deliberately live OUTSIDE
+// this box (see <ControlBar> in the room render): Xafor asked for the
+// controller below the video, not overlaid on it.
+function VideoGrid() {
+  const tracks = useTracks([
+    { source: Track.Source.Camera, withPlaceholder: true },
+    { source: Track.Source.ScreenShare, withPlaceholder: false },
+  ]);
+  return (
+    <GridLayout tracks={tracks} className="h-full">
+      <ParticipantTile />
+    </GridLayout>
+  );
 }
 
 // ---- avatar helpers (deterministic initials + colour per name) ----
@@ -946,36 +967,56 @@ function RoomInner() {
 
       <div className="flex flex-1 flex-col lg:flex-row">
         <div className="flex flex-1 flex-col gap-3 p-4 lg:p-5">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-black">
-            <div className="h-[55vh] w-full lg:h-auto lg:min-h-[62vh] lg:flex-1">
-              <LiveKitRoom
-                token={livekitToken}
-                serverUrl={livekitUrl}
-                connect
-                audio={false}
-                video={false}
-                onConnected={() => {
-                  setVideoConnected(true);
-                  setVideoError('');
-                }}
-                onDisconnected={() => setVideoConnected(false)}
-                onError={(err) =>
-                  setVideoError(
-                    err?.message ||
-                      'Could not connect to the video service.',
-                  )
-                }
-                className="h-full w-full"
-              >
-                <VideoConference />
-                <ParticipantTracker onChange={onParticipantsChange} />
-              </LiveKitRoom>
+          <LiveKitRoom
+            token={livekitToken}
+            serverUrl={livekitUrl}
+            connect
+            audio={false}
+            video={false}
+            onConnected={() => {
+              setVideoConnected(true);
+              setVideoError('');
+            }}
+            onDisconnected={() => setVideoConnected(false)}
+            onError={(err) =>
+              setVideoError(
+                err?.message || 'Could not connect to the video service.',
+              )
+            }
+            className="flex min-h-0 flex-1 flex-col gap-3"
+          >
+            {/* Video only inside the black box — no controls in here. */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-black">
+              <div className="h-[55vh] w-full lg:h-auto lg:min-h-[58vh] lg:flex-1">
+                <VideoGrid />
+                <RoomAudioRenderer />
+              </div>
             </div>
-          </div>
+            {/* Controller bar: OUTSIDE and below the video box. The mic
+                and camera toggles are the essential controls (they toggle
+                the local tracks); screen share stays as an extra. Leave
+                is off here — the header Leave button closes the seat
+                properly — and chat is off because the side panel already
+                carries the Supabase group chat. */}
+            <div className="call-controls-bar">
+              <ControlBar
+                variation="verbose"
+                controls={{
+                  microphone: true,
+                  camera: true,
+                  screenShare: true,
+                  chat: false,
+                  leave: false,
+                  settings: false,
+                }}
+              />
+            </div>
+            <ParticipantTracker onChange={onParticipantsChange} />
+          </LiveKitRoom>
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <p className="text-sm text-muted">
               Members-only LiveKit call — your mic and camera start off;
-              turn them on from the video controls.
+              turn them on from the controls below the video.
               {videoConnected ? '' : ' Connecting to video…'}
             </p>
             {videoError && (

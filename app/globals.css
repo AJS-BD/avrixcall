@@ -465,3 +465,23 @@ button:focus-visible {
   border-radius: 1rem;
   border-top-right-radius: 0.25rem;
 }
+
+/* External call controller bar — sits BELOW the video box (never inside
+   or overlaid on it): mic / camera / screen-share toggles on the app's
+   dark panel styling, centered. */
+.call-controls-bar {
+  display: flex;
+  justify-content: center;
+  border: 1px solid #26241f;
+  border-radius: 1rem;
+  background: #0d0d0b;
+  padding: 0.5rem 0.75rem;
+}
+.call-controls-bar .lk-control-bar {
+  border-top: none;
+  background: transparent;
+  justify-content: center;
+}
+.call-controls-bar .lk-button {
+  color: #f3ead2;
+}
